@@ -1,0 +1,11 @@
+*.mk
+*.obj
+*.d
+app/FlashROM_StackLibrary/app.hex
+app/FlashROM_StackLibrary/app.out
+app/FlashROM_StackLibrary/configPkg/
+app/FlashROM_StackLibrary/app.map
+app/FlashROM_StackLibrary/app_linkInfo.xml
+app/FlashROM_StackLibrary/makefile
+
+/.metadata/
