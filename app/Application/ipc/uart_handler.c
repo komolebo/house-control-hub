@@ -4,16 +4,24 @@
  *  Created on: 22 квіт. 2020 р.
  *      Author: Oleh
  */
+#define TEST    (1)
+
 /*******************************************************************************
  * INCLUDES
  */
-#include "uart_handler.h"
 #include <Board.h>
+#include "uart_handler.h"
+#include "msg_handler.h"
 
 /* Driver Header files */
 #include <ti/drivers/GPIO.h>
 #include <ti/drivers/UART.h>
 
+#if TEST
+#include <ti/sysbios/knl/Semaphore.h>
+#include <ti/sysbios/BIOS.h>
+#include <xdc/runtime/Error.h>
+#endif
 /*********************************************************************
  * CONSTANTS
  */
@@ -24,9 +32,9 @@
 #define UART_TASK_STACK_SIZE                    (512)
 #endif
 
-#define UART_HANDLER_BAUD_RATE                  (9600)
+#define UART_HANDLER_BAUD_RATE                  (9600)  /* TODO: increase to 115200 */
 
-#define UART_MAX_BUF_SIZE                       (1)
+#define IPC_MSG_SIZE                            (sizeof(serialProtoMsg_t))
 
 
 /*********************************************************************
@@ -54,13 +62,21 @@ static uint8_t uartTaskStack[UART_TASK_STACK_SIZE];
 
 // Uart configuration
 static UART_Params uartParams;
-static UART_Handle uart;
+static UART_Handle uartHandle;
 
 
 
 /*********************************************************************
  * PUBLIC FUNCTIONS
  */
+
+#if 0
+void uartReadCallback(UART_Handle handle, void *buffer, size_t num)
+{
+    UART_write(uartHandle, buffer, num);
+    UART_read(uartHandle, &input, UART_MAX_BUF_SIZE);
+}
+#endif
 
 void UartHandler_init()
 {
@@ -70,19 +86,21 @@ void UartHandler_init()
 
     /* Create a UART with data processing off. */
     UART_Params_init(&uartParams);
-    uartParams.writeDataMode    = UART_DATA_BINARY;
-    uartParams.readDataMode     = UART_DATA_BINARY;
-    uartParams.writeMode        = UART_MODE_BLOCKING;
-    uartParams.readMode         = UART_MODE_BLOCKING;
-//    uartParams.writeCallback    = &uartWriteCallback;
-//    uartParams.readCallback     = &uartReadCallback;
-    uartParams.readReturnMode   = UART_RETURN_NEWLINE;
-    uartParams.readEcho         = UART_ECHO_OFF;
-    uartParams.baudRate         = UART_HANDLER_BAUD_RATE; // TODO
 
-    uart = UART_open(Board_UART0, &uartParams);
+    /* Establist uart TX/RX parameters */
+    {
+        uartParams.baudRate = UART_HANDLER_BAUD_RATE;
+        uartParams.writeDataMode = UART_DATA_BINARY;
+        uartParams.readDataMode = UART_DATA_BINARY;
+        uartParams.writeMode = UART_MODE_BLOCKING;
+        uartParams.readMode = UART_MODE_BLOCKING;
+        uartParams.readReturnMode = UART_RETURN_FULL;
+        uartParams.readEcho = UART_ECHO_OFF;
+    }
 
-    if (uart == NULL)
+    uartHandle = UART_open(Board_UART0, &uartParams);
+
+    if (uartHandle == NULL)
     {
         System_abort("Error opening the UART");
     }
@@ -90,14 +108,33 @@ void UartHandler_init()
 
 static void UartHandler_Task()
 {
-    static uint8_t input[UART_MAX_BUF_SIZE];
+    uint8_t rxBuffer[IPC_MSG_SIZE] = { 0 };
+//    serialProtoMsg_t
 
     int32_t uart_status;
 
+#if 0
+    Semaphore_Handle semaphore0;
+    Semaphore_Params semaphoreParams;
+    Error_Block eb = { 0 };
+
+    Semaphore_Params_init(&semaphoreParams);
+    semaphore0 = Semaphore_create(0, &semaphoreParams, &eb);
+
+#endif
     for (;;)
     {
-        uart_status = UART_read(uart, &input, UART_MAX_BUF_SIZE);
-        UART_write(uart, &input, UART_MAX_BUF_SIZE);
+//        Semaphore_pend(semaphore0, BIOS_WAIT_FOREVER);
+        uart_status = UART_read(uartHandle, &rxBuffer, IPC_MSG_SIZE);
+
+        if (uart_status != UART_STATUS_ERROR)
+        {
+            /* Decode and send here an event to application */
+
+        }
+
+        rxBuffer[IPC_MSG_SIZE - 1] = '\n';
+        UART_write(uartHandle, &rxBuffer, IPC_MSG_SIZE);
     }
 }
 
@@ -105,8 +142,11 @@ static void uartHandlerFxn(UArg arg0, UArg arg1)
 {
     UartHandler_init();
 
+
+#if TEST
     const char echoPrompt[] = "\fTesting:\r\n";
-    UART_write(uart, echoPrompt, sizeof(echoPrompt));
+    UART_write(uartHandle, echoPrompt, sizeof(echoPrompt));
+#endif
 
     UartHandler_Task();
 }

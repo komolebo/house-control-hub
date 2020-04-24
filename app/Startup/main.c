@@ -74,7 +74,7 @@ icall_userCfg_t user0Cfg = BLE_USER_CFG;
 #include <ti/display/Display.h>
 
 #include "central.h"
-#include "uart_handler.h"
+#include "ipc/uart_handler.h"
 
 /*******************************************************************************
  * MACROS

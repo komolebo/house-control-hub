@@ -77,6 +77,8 @@
 #define CS_SENSITIVITY_LEN           1
 
 
+#define UUID_DATA_LEN               (16)
+
 /*********************************************************************
  * MACROS
  */
