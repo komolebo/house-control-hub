@@ -10,6 +10,9 @@
 /*********************************************************************
  * INCLUDES
  */
+#include <bcomdef.h>
+#include "util.h"
+#include "icall_ble_api.h"
 
 /*********************************************************************
 *  EXTERNAL VARIABLES
@@ -18,6 +21,18 @@
 /*********************************************************************
  * CONSTANTS
  */
+// Application events
+#define EVT_IPC_CENTRAL         0x00
+#define EVT_IPC_PERIPHERAL      0x01
+#define EVT_SCAN_ENABLED        0x02
+#define EVT_SCAN_DISABLED       0x03
+#define EVT_ADV_REPORT          0x04
+#define EVT_SVC_DISC            0x05
+#define EVT_READ_RSSI           0x06
+#define EVT_PAIR_STATE          0x07
+#define EVT_PASSCODE_NEEDED     0x08
+#define EVT_READ_RPA            0x09
+#define EVT_INSUFFICIENT_MEM    0x0A
 
 // Maximum number of scan results.
 // Note: this value cannot be greater than the number of items reserved in
@@ -38,6 +53,8 @@
  */
 extern void Central_createTask(void);
 extern void AssertHandler(uint8_t assertCause, uint8_t assertSubcause);
+extern status_t Central_enqueueMsg(uint8_t event, uint8_t state,
+                                   uint8_t *pData);
 
 
 #endif /* APPLICATION_CENTRAL_CENTRAL_H_ */

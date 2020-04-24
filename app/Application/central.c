@@ -37,23 +37,14 @@
  * CONSTANTS
  */
 
+/* Temporary close traces */
 void Log_info0(uint8_t * s) {}
 void Log_info1(uint8_t * s,  char c) {}
 void Log_info2(uint8_t * s,  char c,  char c1) {}
 void Log_info3(uint8_t * s,  char c,  char c1,  char c2) {}
 void Log_info4(uint8_t * s,  char c,  char c1,  char c2,  char c3) {}
 
-// Application events
-#define SC_EVT_KEY_CHANGE          0x01
-#define SC_EVT_SCAN_ENABLED        0x02
-#define SC_EVT_SCAN_DISABLED       0x03
-#define SC_EVT_ADV_REPORT          0x04
-#define SC_EVT_SVC_DISC            0x05
-#define SC_EVT_READ_RSSI           0x06
-#define SC_EVT_PAIR_STATE          0x07
-#define SC_EVT_PASSCODE_NEEDED     0x08
-#define SC_EVT_READ_RPA            0x09
-#define SC_EVT_INSUFFICIENT_MEM    0x0A
+
 
 // Task configuration
 #define CENTRAL_TASK_PRIORITY                     1
@@ -67,7 +58,7 @@ void Log_info4(uint8_t * s,  char c,  char c1,  char c2,  char c3) {}
 
 // Advertising report fields to keep in the list
 // Interested in only peer address type and peer address
-#define SC_ADV_RPT_FIELDS   (SCAN_ADVRPT_FLD_ADDRTYPE | SCAN_ADVRPT_FLD_ADDRESS)
+#define ADV_RPT_FIELDS   (SCAN_ADVRPT_FLD_ADDRTYPE | SCAN_ADVRPT_FLD_ADDRESS)
 
 // Size of string-converted device address ("0xXXXXXXXXXXXX")
 #define SC_ADDR_STR_SIZE     15
@@ -193,8 +184,6 @@ uint8_t centralTaskStack[CENTRAL_TASK_STACK_SIZE];
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
-static status_t Central_enqueueMsg(uint8_t event, uint8_t state,
-                                   uint8_t *pData);
 static void Central_pairStateCb(uint16_t connHandle, uint8_t state,
                                 uint8_t status);
 static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
@@ -526,12 +515,7 @@ static void Central_processAppMsg(scEvt_t *pMsg)
 
     switch (pMsg->hdr.event)
     {
-#if 0
-    case SC_EVT_KEY_CHANGE:
-        SimpleCentral_handleKeys(pMsg->hdr.state);
-        break;
-#endif
-    case SC_EVT_ADV_REPORT:
+    case EVT_ADV_REPORT:
     {
         GapScan_Evt_AdvRpt_t* pAdvRpt = (GapScan_Evt_AdvRpt_t*) (pMsg->pData);
 
@@ -556,11 +540,11 @@ static void Central_processAppMsg(scEvt_t *pMsg)
         break;
     }
 
-    case SC_EVT_SCAN_ENABLED:
+    case EVT_SCAN_ENABLED:
         Log_info0("Discovering...");
         break;
 
-    case SC_EVT_SCAN_DISABLED:
+    case EVT_SCAN_DISABLED:
     {
         uint8_t numReport;
         uint8_t i;
@@ -646,11 +630,11 @@ static void Central_processAppMsg(scEvt_t *pMsg)
         break;
     }
 
-    case SC_EVT_SVC_DISC:
+    case EVT_SVC_DISC:
         Central_startSvcDiscovery();
         break;
 
-    case SC_EVT_READ_RSSI:
+    case EVT_READ_RSSI:
     {
         uint8_t connIndex = pMsg->hdr.state;
         uint16_t connHandle = connList[connIndex].connHandle;
@@ -669,7 +653,7 @@ static void Central_processAppMsg(scEvt_t *pMsg)
     }
 
         // Pairing event
-    case SC_EVT_PAIR_STATE:
+    case EVT_PAIR_STATE:
     {
         Central_processPairState(pMsg->hdr.state,
                                        (scPairStateData_t*) (pMsg->pData));
@@ -677,14 +661,14 @@ static void Central_processAppMsg(scEvt_t *pMsg)
     }
 
         // Passcode event
-    case SC_EVT_PASSCODE_NEEDED:
+    case EVT_PASSCODE_NEEDED:
     {
         Central_processPasscode((scPasscodeData_t *) (pMsg->pData));
         break;
     }
 
 #if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
-    case SC_EVT_READ_RPA:
+    case EVT_READ_RPA:
     {
         uint8_t* pRpaNew;
 
@@ -702,7 +686,7 @@ static void Central_processAppMsg(scEvt_t *pMsg)
 #endif // PRIVACY_1_2_CFG
 
         // Insufficient memory
-    case SC_EVT_INSUFFICIENT_MEM:
+    case EVT_INSUFFICIENT_MEM:
     {
         // We are running out of memory.
         Log_info0("Insufficient Memory");
@@ -845,7 +829,7 @@ static void Central_pairStateCb(uint16_t connHandle, uint8_t state,
         pData->status = status;
 
         // Queue the event.
-        if (Central_enqueueMsg(SC_EVT_PAIR_STATE, state, (uint8_t*) pData) != SUCCESS)
+        if (Central_enqueueMsg(EVT_PAIR_STATE, state, (uint8_t*) pData) != SUCCESS)
         {
             ICall_free(pData);
         }
@@ -885,7 +869,7 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
         pData->numComparison = numComparison;
 
         // Enqueue the event.
-        if (Central_enqueueMsg(SC_EVT_PASSCODE_NEEDED, 0,
+        if (Central_enqueueMsg(EVT_PASSCODE_NEEDED, 0,
                                      (uint8_t *) pData) != SUCCESS)
         {
             ICall_free(pData);
@@ -904,7 +888,7 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
  *
  * @return  TRUE or FALSE
  */
-static status_t Central_enqueueMsg(uint8_t event, uint8_t state,
+status_t Central_enqueueMsg(uint8_t event, uint8_t state,
                                          uint8_t *pData)
 {
     uint8_t success;
@@ -1224,19 +1208,19 @@ void Central_scanCb(uint32_t evt, void* pMsg, uintptr_t arg)
 
     if (evt & GAP_EVT_ADV_REPORT)
     {
-        event = SC_EVT_ADV_REPORT;
+        event = EVT_ADV_REPORT;
     }
     else if (evt & GAP_EVT_SCAN_ENABLED)
     {
-        event = SC_EVT_SCAN_ENABLED;
+        event = EVT_SCAN_ENABLED;
     }
     else if (evt & GAP_EVT_SCAN_DISABLED)
     {
-        event = SC_EVT_SCAN_DISABLED;
+        event = EVT_SCAN_DISABLED;
     }
     else if (evt & GAP_EVT_INSUFFICIENT_MEMORY)
     {
-        event = SC_EVT_INSUFFICIENT_MEM;
+        event = EVT_INSUFFICIENT_MEM;
     }
     else
     {
@@ -1264,15 +1248,15 @@ void Central_clockHandler(UArg arg)
 
     switch (evtId)
     {
-    case SC_EVT_READ_RSSI:
-        Central_enqueueMsg(SC_EVT_READ_RSSI, (uint8_t) (arg >> 8), NULL);
+    case EVT_READ_RSSI:
+        Central_enqueueMsg(EVT_READ_RSSI, (uint8_t) (arg >> 8), NULL);
         break;
 
-    case SC_EVT_READ_RPA:
+    case EVT_READ_RPA:
         // Restart timer
         Util_startClock(&clkRpaRead);
         // Let the application handle the event
-        Central_enqueueMsg(SC_EVT_READ_RPA, 0, NULL);
+        Central_enqueueMsg(EVT_READ_RPA, 0, NULL);
         break;
 
     default:
@@ -1345,7 +1329,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
                              SCAN_PARAM_DFLT_INTERVAL);
 
         // Set Advertising report fields to keep
-        temp16 = SC_ADV_RPT_FIELDS;
+        temp16 = ADV_RPT_FIELDS;
         GapScan_setParam(SCAN_PARAM_RPT_FIELDS, &temp16);
 
         // Set Scanning Primary PHY
@@ -1368,7 +1352,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
 
 //        // Enable "Discover Devices", "Set Scanning PHY", and "Set Address Type"
 //        // in the main menu
-//        tbm_setItemStatus(&scMenuMain, SC_ITEM_STARTDISC | SC_ITEM_SCANPHY,
+//        tbm_setItemStatus(&scMenuMain, ITEM_STARTDISC | SC_ITEM_SCANPHY,
 //                          SC_ITEM_NONE);
 //
 //        Display_printf(dispHandle, SC_ROW_NON_CONN, 0, "Initialized");
@@ -1390,7 +1374,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
 
             // Create one-shot clock for RPA check event.
             Util_constructClock(&clkRpaRead, Central_clockHandler,
-                                SC_READ_RPA_PERIOD, 0, true, SC_EVT_READ_RPA);
+                                SC_READ_RPA_PERIOD, 0, true, EVT_READ_RPA);
         }
 #endif // PRIVACY_1_2_CFG
         break;

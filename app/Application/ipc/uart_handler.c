@@ -12,6 +12,7 @@
 #include <Board.h>
 #include "uart_handler.h"
 #include "msg_handler.h"
+#include "central.h" // TODO: move queue tools to util.c
 
 /* Driver Header files */
 #include <ti/drivers/GPIO.h>
@@ -122,6 +123,9 @@ static void UartHandler_Task()
     semaphore0 = Semaphore_create(0, &semaphoreParams, &eb);
 
 #endif
+    uint8_t response[IPC_MSG_SIZE + 2];
+    response[0] = response[IPC_MSG_SIZE + 1] = '\n';
+
     for (;;)
     {
 //        Semaphore_pend(semaphore0, BIOS_WAIT_FOREVER);
@@ -130,10 +134,11 @@ static void UartHandler_Task()
         if (uart_status != UART_STATUS_ERROR)
         {
             /* Decode and send here an event to application */
-
+            process_rx_ipc_msg(rxBuffer, IPC_MSG_SIZE);
         }
 
-        rxBuffer[IPC_MSG_SIZE - 1] = '\n';
+        // debug echo
+        memcpy(&response[1], &rxBuffer, IPC_MSG_SIZE);
         UART_write(uartHandle, &rxBuffer, IPC_MSG_SIZE);
     }
 }
