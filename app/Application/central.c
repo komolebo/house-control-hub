@@ -33,24 +33,28 @@
 //#include <uartlog/UartLog.h>  // Comment out if using xdc Log
 #include "profiles_if.h"
 
+#include "ipc/uart_handler.h"
+
+//#include <uartlog/UartLog.h>
+#include "ipc/msg_handler.h"
+
 /*********************************************************************
  * CONSTANTS
  */
 
 /* Temporary close traces */
-void Log_info0(uint8_t * s) {}
-void Log_info1(uint8_t * s,  char c) {}
-void Log_info2(uint8_t * s,  char c,  char c1) {}
-void Log_info3(uint8_t * s,  char c,  char c1,  char c2) {}
-void Log_info4(uint8_t * s,  char c,  char c1,  char c2,  char c3) {}
-
+void Log_info0(uint8_t * s) { UART_write(uartHandle, s, sizeof(s)); }
+void Log_info1(uint8_t * s,  char c) { UART_write(uartHandle, s, sizeof(s)); }
+void Log_info2(uint8_t * s,  char c,  char c1) { UART_write(uartHandle, s, sizeof(s)); }
+void Log_info3(uint8_t * s,  char c,  char c1,  char c2) {UART_write(uartHandle, s, sizeof(s)); }
+void Log_info4(uint8_t * s,  char c,  char c1,  char c2,  char c3) {UART_write(uartHandle, s, sizeof(s)); }
 
 
 // Task configuration
 #define CENTRAL_TASK_PRIORITY                     1
 
-#ifndef SC_TASK_STACK_SIZE
-#define CENTRAL_TASK_STACK_SIZE                   512
+#ifndef CENTRAL_TASK_STACK_SIZE
+#define CENTRAL_TASK_STACK_SIZE                   2048
 #endif
 
 // TRUE to filter discovery results on desired service UUID
@@ -125,12 +129,6 @@ enum
   BLE_DISC_STATE_CHAR                 // Characteristic discovery
 };
 
-// App event passed from profiles.
-typedef struct
-{
-  appEvtHdr_t hdr; // event header
-  uint8_t *pData;  // event data
-} scEvt_t;
 
 // Scanned device information record
 typedef struct
@@ -181,6 +179,8 @@ Task_Struct centralTask;
 #endif
 uint8_t centralTaskStack[CENTRAL_TASK_STACK_SIZE];
 
+ICall_EntityID selfEntity;
+
 /*********************************************************************
  * LOCAL FUNCTIONS
  */
@@ -190,7 +190,7 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
                                uint8_t uiInputs, uint8_t uiOutputs,
                                uint32_t numComparison);
 static uint8_t Central_processStackMsg(ICall_Hdr *pMsg);
-static void Central_processAppMsg(scEvt_t *pMsg);
+static void Central_processAppMsg(appEvt_t *pMsg);
 static void Central_addScanInfo(uint8_t *pAddr, uint8_t addrType);
 static uint8_t Central_getConnIndex(uint16_t connHandle);
 static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg);
@@ -204,6 +204,7 @@ static bool SimpleCentral_findSvcUuid(uint16_t uuid, uint8_t *pData,
 static status_t Central_CancelRssi(uint16_t connHandle);
 static char* SimpleCentral_getConnAddrStr(uint16_t connHandle);
 static uint8_t Central_removeConnInfo(uint16_t connHandle);
+static void Central_processHubReq(msgCentral_t *ipcMsg);
 /*********************************************************************
  * LOCAL VARIABLES
  */
@@ -212,15 +213,14 @@ static uint8_t Central_removeConnInfo(uint16_t connHandle);
 static const uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "Central";
 
 // Entity ID globally used to check for source and/or destination of messages
-static ICall_EntityID selfEntity;
 
 // Event globally used to post local events and pend on system and
 // local events.
-static ICall_SyncHandle syncEvent;
+
 
 // Queue object used for app messages
-static Queue_Struct appMsg;
-static Queue_Handle appMsgQueue;
+
+
 
 // Address mode
 static GAP_Addr_Modes_t addrMode = DEFAULT_ADDRESS_MODE;
@@ -311,7 +311,7 @@ static void Central_spin(void)
  *
  * @return  none
  */
-static void Central_init(void)
+static void Central_init( )
 {
     uint8_t i;
 
@@ -320,10 +320,10 @@ static void Central_init(void)
     // ******************************************************************
     // Register the current thread as an ICall dispatcher application
     // so that the application can send and receive messages.
-    ICall_registerApp(&selfEntity, &syncEvent);
+    ICall_registerApp(&selfEntity, &eventSyncHandle);
 
     // Create an RTOS queue for message from profile to be sent to app.
-    appMsgQueue = Util_constructQueue(&appMsg);
+
 
     // Initialize internal data
     for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
@@ -428,8 +428,7 @@ static void Central_taskFxn(uintptr_t a0, uintptr_t a1)
     {
         uint32_t events;
 
-        events = Event_pend(syncEvent, Event_Id_NONE, SC_ALL_EVENTS,
-                            ICALL_TIMEOUT_FOREVER);
+        events = Util_listenEventMsg(SC_ALL_EVENTS);
 
         if (events)
         {
@@ -464,8 +463,8 @@ static void Central_taskFxn(uintptr_t a0, uintptr_t a1)
             // If RTOS queue is not empty, process app message
             if (events & SC_QUEUE_EVT)
             {
-                scEvt_t * pMsg;
-                while (pMsg = (scEvt_t *) Util_dequeueMsg(appMsgQueue))
+                appEvt_t * pMsg;
+                while (pMsg = (appEvt_t *) Util_dequeueAppMsg())
                 {
                     // Process message
                     Central_processAppMsg(pMsg);
@@ -487,7 +486,7 @@ static void Central_taskFxn(uintptr_t a0, uintptr_t a1)
  *
  * @return  none
  */
-void Central_createTask(void)
+void Central_createTask()
 {
     Task_Params taskParams;
 
@@ -499,7 +498,8 @@ void Central_createTask(void)
 
     Task_construct(&centralTask, Central_taskFxn, &taskParams, NULL);
 }
-
+#include <stdio.h>
+#include <stdlib.h>
 /*********************************************************************
  * @fn      Central_processAppMsg
  *
@@ -509,7 +509,7 @@ void Central_createTask(void)
  *
  * @return  none
  */
-static void Central_processAppMsg(scEvt_t *pMsg)
+static void Central_processAppMsg(appEvt_t *pMsg)
 {
     bool safeToDealloc = TRUE;
 
@@ -517,6 +517,7 @@ static void Central_processAppMsg(scEvt_t *pMsg)
     {
     case EVT_ADV_REPORT:
     {
+        UART_write(uartHandle, "EVT_ADV_REPORT\n", 25);
         GapScan_Evt_AdvRpt_t* pAdvRpt = (GapScan_Evt_AdvRpt_t*) (pMsg->pData);
 
 #if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
@@ -541,11 +542,13 @@ static void Central_processAppMsg(scEvt_t *pMsg)
     }
 
     case EVT_SCAN_ENABLED:
+        UART_write(uartHandle, "EVT_SCAN_ENABLED\n", 25);
         Log_info0("Discovering...");
         break;
 
     case EVT_SCAN_DISABLED:
     {
+        UART_write(uartHandle, "EVT_SCAN_DISABLED\n", 25);
         uint8_t numReport;
         uint8_t i;
         static uint8_t* pAddrs = NULL;
@@ -631,11 +634,13 @@ static void Central_processAppMsg(scEvt_t *pMsg)
     }
 
     case EVT_SVC_DISC:
+        UART_write(uartHandle, "EVT_SVC_DISC\n", 25);
         Central_startSvcDiscovery();
         break;
 
     case EVT_READ_RSSI:
     {
+        UART_write(uartHandle, "EVT_READ_RSSI\n", 25);
         uint8_t connIndex = pMsg->hdr.state;
         uint16_t connHandle = connList[connIndex].connHandle;
 
@@ -655,6 +660,7 @@ static void Central_processAppMsg(scEvt_t *pMsg)
         // Pairing event
     case EVT_PAIR_STATE:
     {
+        UART_write(uartHandle, "EVT_PAIR_STATE\n", 25);
         Central_processPairState(pMsg->hdr.state,
                                        (scPairStateData_t*) (pMsg->pData));
         break;
@@ -663,6 +669,7 @@ static void Central_processAppMsg(scEvt_t *pMsg)
         // Passcode event
     case EVT_PASSCODE_NEEDED:
     {
+        UART_write(uartHandle, "EVT_PASSCODE_NEEDED\n", 25);
         Central_processPasscode((scPasscodeData_t *) (pMsg->pData));
         break;
     }
@@ -670,6 +677,11 @@ static void Central_processAppMsg(scEvt_t *pMsg)
 #if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
     case EVT_READ_RPA:
     {
+        if(Util_enqueueAppMsg(EVT_INSUFFICIENT_MEM, SUCCESS, NULL) != SUCCESS)
+        {
+
+        }
+        UART_write(uartHandle, "EVT_READ_RPA\n", 25);
         uint8_t* pRpaNew;
 
         // Read the current RPA.
@@ -688,6 +700,7 @@ static void Central_processAppMsg(scEvt_t *pMsg)
         // Insufficient memory
     case EVT_INSUFFICIENT_MEM:
     {
+        UART_write(uartHandle, "EVT_INSUFFICIENT_MEM\n", 22);
         // We are running out of memory.
         Log_info0("Insufficient Memory");
 
@@ -696,6 +709,19 @@ static void Central_processAppMsg(scEvt_t *pMsg)
         break;
     }
 
+    case EVT_IPC_CENTRAL_CMD:
+        Central_processHubReq((msgCentral_t *)pMsg->pData);
+        UART_write(uartHandle, "EVT_IPC_CENTRAL\n", 17);
+        break;
+
+    case EVT_IPC_PERIPHERAL:
+        UART_write(uartHandle, "EVT_IPC_PERIPHE\n", 17);
+        GapScan_disable();
+        break;
+
+    case EVT_DEVICE_GATT_REQ:
+        UART_write(uartHandle, "EVT_DEVICE_GATT_REQ\n", 21);
+        break;
     default:
         // Do nothing.
         break;
@@ -829,7 +855,7 @@ static void Central_pairStateCb(uint16_t connHandle, uint8_t state,
         pData->status = status;
 
         // Queue the event.
-        if (Central_enqueueMsg(EVT_PAIR_STATE, state, (uint8_t*) pData) != SUCCESS)
+        if (Util_enqueueAppMsg(EVT_PAIR_STATE, state, (uint8_t*) pData) != SUCCESS)
         {
             ICall_free(pData);
         }
@@ -869,7 +895,7 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
         pData->numComparison = numComparison;
 
         // Enqueue the event.
-        if (Central_enqueueMsg(EVT_PASSCODE_NEEDED, 0,
+        if (Util_enqueueAppMsg(EVT_PASSCODE_NEEDED, 0,
                                      (uint8_t *) pData) != SUCCESS)
         {
             ICall_free(pData);
@@ -877,37 +903,7 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
     }
 }
 
-/*********************************************************************
- * @fn      Central_enqueueMsg
- *
- * @brief   Creates a message and puts the message in RTOS queue.
- *
- * @param   event - message event.
- * @param   state - message state.
- * @param   pData - message data pointer.
- *
- * @return  TRUE or FALSE
- */
-status_t Central_enqueueMsg(uint8_t event, uint8_t state,
-                                         uint8_t *pData)
-{
-    uint8_t success;
-    scEvt_t *pMsg = ICall_malloc(sizeof(scEvt_t));
 
-    // Create dynamic pointer to message.
-    if (pMsg)
-    {
-        pMsg->hdr.event = event;
-        pMsg->hdr.state = state;
-        pMsg->pData = pData;
-
-        // Enqueue the message.
-        success = Util_enqueueMsg(appMsgQueue, syncEvent, (uint8_t *) pMsg);
-        return (success) ? SUCCESS : FAILURE;
-    }
-
-    return (bleMemAllocError);
-}
 
 /*********************************************************************
  * @fn      Central_processGATTDiscEvent
@@ -1227,7 +1223,7 @@ void Central_scanCb(uint32_t evt, void* pMsg, uintptr_t arg)
         return;
     }
 
-    if (Central_enqueueMsg(event, SUCCESS, pMsg) != SUCCESS)
+    if (Util_enqueueAppMsg(event, SUCCESS, pMsg) != SUCCESS)
     {
         ICall_free(pMsg);
     }
@@ -1249,14 +1245,14 @@ void Central_clockHandler(UArg arg)
     switch (evtId)
     {
     case EVT_READ_RSSI:
-        Central_enqueueMsg(EVT_READ_RSSI, (uint8_t) (arg >> 8), NULL);
+        Util_enqueueAppMsg(EVT_READ_RSSI, (uint8_t) (arg >> 8), NULL);
         break;
 
     case EVT_READ_RPA:
         // Restart timer
         Util_startClock(&clkRpaRead);
         // Let the application handle the event
-        Central_enqueueMsg(EVT_READ_RPA, 0, NULL);
+//        Util_enqueueAppMsg(EVT_READ_RPA, 0, NULL);
         break;
 
     default:
@@ -1812,5 +1808,19 @@ static uint8_t Central_removeConnInfo(uint16_t connHandle)
     }
 
     return i;
+}
+
+static void Central_processHubReq(msgCentral_t *ipcMsg)
+{
+    switch (ipcMsg->cmd) {
+        case CENTRAL_MSG_DISCOVER:
+            Util_enqueueAppMsg(EVT_SVC_DISC, SUCCESS, NULL);
+            break;
+        case CENTRAL_MSG_RESET_REGISTRATION:
+
+            break;
+        default:
+            break;
+    }
 }
 

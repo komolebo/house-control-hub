@@ -148,6 +148,8 @@ int main()
 
   UartHandler_createTask();
 
+  Util_constructQueue();
+
   Central_createTask();
 
   /* enable interrupts and start SYS/BIOS */

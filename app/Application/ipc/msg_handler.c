@@ -12,7 +12,9 @@
 #include "central.h"
 
 #include <bcomdef.h>
-
+#include "uart_handler.h"
+#include <ti/sysbios/knl/Event.h>
+#include <ti/sysbios/knl/Queue.h>
 
 /*********************************************************************
 *  EXTERNAL VARIABLES
@@ -26,29 +28,33 @@
 /*********************************************************************
  * MACROS
  */
-
 /*********************************************************************
  * FUNCTIONS
  */
 void process_rx_ipc_msg(uint8_t *data, size_t len)
 {
+    serialProtoMsg_t *pSerialProtoMsg;
+//    char (*__kaboom)[sizeof(serialProtoMsg_t)] = 1;
+
     if ((data != NULL) && (len >= sizeof(packageHeader_t)))
     {
-        serialProtoMsg_t *pSerialProtoMsg = (serialProtoMsg_t *)data;
+        pSerialProtoMsg = (serialProtoMsg_t *)data;
 
         /* Message is sent for central device */
+        uint16_t packType = pSerialProtoMsg->header.package_type;
         if (pSerialProtoMsg->header.package_type == PACKAGE_CMD)
         {
             if (len >= (sizeof(packageHeader_t) + sizeof(msgCentral_t)))
             {
                 msgCentral_t *pData = ICall_malloc(sizeof(msgCentral_t));
+                uint16_t event = pSerialProtoMsg->data.central_msg_data.cmd;
 
                 memcpy((uint8_t *) pData,
                        (uint8_t *) &pSerialProtoMsg->data.central_msg_data,
                        sizeof(msgCentral_t));
 
-                if (Central_enqueueMsg(EVT_IPC_CENTRAL, SUCCESS, (uint8_t*) pData)
-                        != SUCCESS)
+                if (Util_enqueueAppMsg(EVT_IPC_CENTRAL_CMD, SUCCESS,
+                                       (uint8_t *) pData) != SUCCESS)
                 {
                     ICall_free(pData);
                 }
@@ -69,8 +75,8 @@ void process_rx_ipc_msg(uint8_t *data, size_t len)
                        (uint8_t *) &pSerialProtoMsg->data.peripheral_msg_data,
                        sizeof(msgPeripheral_t));
 
-                if (Central_enqueueMsg(EVT_IPC_PERIPHERAL, SUCCESS, (uint8_t*) pData)
-                        != SUCCESS)
+                if (Util_enqueueAppMsg(EVT_DEVICE_GATT_REQ, SUCCESS,
+                                       (uint8_t *) pData) != SUCCESS)
                 {
                     ICall_free(pData);
                 }

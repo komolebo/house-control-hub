@@ -9,6 +9,7 @@
 /*******************************************************************************
  * INCLUDES
  */
+#include <ti/display/Display.h>
 #include <Board.h>
 #include "uart_handler.h"
 #include "msg_handler.h"
@@ -16,12 +17,13 @@
 
 /* Driver Header files */
 #include <ti/drivers/GPIO.h>
-#include <ti/drivers/UART.h>
+//#include <ti/drivers/UART.h>
 
 #if TEST
 #include <ti/sysbios/knl/Semaphore.h>
 #include <ti/sysbios/BIOS.h>
 #include <xdc/runtime/Error.h>
+#include "util.h"
 #endif
 /*********************************************************************
  * CONSTANTS
@@ -30,10 +32,10 @@
 #define UART_TASK_PRIORITY                      (1)
 
 #ifndef UART_TASK_STACK_SIZE
-#define UART_TASK_STACK_SIZE                    (512)
+#define UART_TASK_STACK_SIZE                    (2048)
 #endif
 
-#define UART_HANDLER_BAUD_RATE                  (9600)  /* TODO: increase to 115200 */
+#define UART_HANDLER_BAUD_RATE                  (115200)  /* TODO: increase to 115200 */
 
 #define IPC_MSG_SIZE                            (sizeof(serialProtoMsg_t))
 
@@ -63,21 +65,13 @@ static uint8_t uartTaskStack[UART_TASK_STACK_SIZE];
 
 // Uart configuration
 static UART_Params uartParams;
-static UART_Handle uartHandle;
+UART_Handle uartHandle;
 
 
 
 /*********************************************************************
  * PUBLIC FUNCTIONS
  */
-
-#if 0
-void uartReadCallback(UART_Handle handle, void *buffer, size_t num)
-{
-    UART_write(uartHandle, buffer, num);
-    UART_read(uartHandle, &input, UART_MAX_BUF_SIZE);
-}
-#endif
 
 void UartHandler_init()
 {
@@ -91,8 +85,8 @@ void UartHandler_init()
     /* Establist uart TX/RX parameters */
     {
         uartParams.baudRate = UART_HANDLER_BAUD_RATE;
-        uartParams.writeDataMode = UART_DATA_BINARY;
-        uartParams.readDataMode = UART_DATA_BINARY;
+        uartParams.writeDataMode = UART_DATA_TEXT;
+        uartParams.readDataMode = UART_DATA_TEXT;
         uartParams.writeMode = UART_MODE_BLOCKING;
         uartParams.readMode = UART_MODE_BLOCKING;
         uartParams.readReturnMode = UART_RETURN_FULL;
@@ -136,10 +130,12 @@ static void UartHandler_Task()
             /* Decode and send here an event to application */
             process_rx_ipc_msg(rxBuffer, IPC_MSG_SIZE);
         }
-
         // debug echo
         memcpy(&response[1], &rxBuffer, IPC_MSG_SIZE);
-        UART_write(uartHandle, &rxBuffer, IPC_MSG_SIZE);
+
+//        UART_write(uartHandle, "Next line:\n", 12);
+
+        memset(rxBuffer, 0, IPC_MSG_SIZE);
     }
 }
 
@@ -149,8 +145,8 @@ static void uartHandlerFxn(UArg arg0, UArg arg1)
 
 
 #if TEST
-    const char echoPrompt[] = "\fTesting:\r\n";
-    UART_write(uartHandle, echoPrompt, sizeof(echoPrompt));
+    const char echoPrompt[] = "Testing:\r\n";
+//    UART_write(uartHandle, echoPrompt, sizeof(echoPrompt));
 #endif
 
     UartHandler_Task();

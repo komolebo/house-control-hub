@@ -3,7 +3,7 @@
  @file  util.c
 
  @brief This file contains utility functions commonly used by
-        BLE applications for CC26xx with TIRTOS.
+ BLE applications for CC26xx with TIRTOS.
 
  Group: WCS, BTS
  Target Device: cc2640r2
@@ -18,15 +18,15 @@
  are met:
 
  *  Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
+ notice, this list of conditions and the following disclaimer.
 
  *  Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
+ notice, this list of conditions and the following disclaimer in the
+ documentation and/or other materials provided with the distribution.
 
  *  Neither the name of Texas Instruments Incorporated nor the names of
-    its contributors may be used to endorse or promote products derived
-    from this software without specific prior written permission.
+ its contributors may be used to endorse or promote products derived
+ from this software without specific prior written permission.
 
  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
@@ -62,7 +62,7 @@
 
 #include "bcomdef.h"
 #include "util.h"
-
+#include "ipc/uart_handler.h"
 
 /*********************************************************************
  * TYPEDEFS
@@ -71,8 +71,8 @@
 // RTOS queue for profile/app messages.
 typedef struct _queueRec_
 {
-  Queue_Elem _elem;          // queue element
-  uint8_t *pData;            // pointer to app data
+    Queue_Elem _elem;          // queue element
+    uint8_t *pData;            // pointer to app data
 } queueRec_t;
 
 /*********************************************************************
@@ -84,11 +84,22 @@ typedef struct _queueRec_
  */
 
 /*********************************************************************
+ * GLOBAL VARIABLES
+ */
+ICall_SyncHandle eventSyncHandle;
+
+/*********************************************************************
  * LOCAL VARIABLES
  */
+static Queue_Handle appMsgQueue;
+static Queue_Struct appMsg;
 
 /*********************************************************************
  * PUBLIC FUNCTIONS
+ */
+
+/*********************************************************************
+ * LOCAL FUNCTIONS
  */
 
 /*********************************************************************
@@ -108,34 +119,32 @@ typedef struct _queueRec_
  * @return  Clock_Handle  - a handle to the clock instance.
  */
 Clock_Handle Util_constructClock(Clock_Struct *pClock,
-                                 Clock_FuncPtr clockCB,
-                                 uint32_t clockDuration,
-                                 uint32_t clockPeriod,
-                                 uint8_t startFlag,
-                                 UArg arg)
+Clock_FuncPtr clockCB,
+                                 uint32_t clockDuration, uint32_t clockPeriod,
+                                 uint8_t startFlag, UArg arg)
 {
-  Clock_Params clockParams;
+    Clock_Params clockParams;
 
-  // Convert clockDuration in milliseconds to ticks.
-  uint32_t clockTicks = clockDuration * (1000 / Clock_tickPeriod);
+    // Convert clockDuration in milliseconds to ticks.
+    uint32_t clockTicks = clockDuration * (1000 / Clock_tickPeriod);
 
-  // Setup parameters.
-  Clock_Params_init(&clockParams);
+    // Setup parameters.
+    Clock_Params_init(&clockParams);
 
-  // Setup argument.
-  clockParams.arg = arg;
+    // Setup argument.
+    clockParams.arg = arg;
 
-  // If period is 0, this is a one-shot timer.
-  clockParams.period = clockPeriod * (1000 / Clock_tickPeriod);
+    // If period is 0, this is a one-shot timer.
+    clockParams.period = clockPeriod * (1000 / Clock_tickPeriod);
 
-  // Starts immediately after construction if true, otherwise wait for a call
-  // to start.
-  clockParams.startFlag = startFlag;
+    // Starts immediately after construction if true, otherwise wait for a call
+    // to start.
+    clockParams.startFlag = startFlag;
 
-  // Initialize clock instance.
-  Clock_construct(pClock, clockCB, clockTicks, &clockParams);
+    // Initialize clock instance.
+    Clock_construct(pClock, clockCB, clockTicks, &clockParams);
 
-  return Clock_handle(pClock);
+    return Clock_handle(pClock);
 }
 
 /*********************************************************************
@@ -149,10 +158,10 @@ Clock_Handle Util_constructClock(Clock_Struct *pClock,
  */
 void Util_startClock(Clock_Struct *pClock)
 {
-  Clock_Handle handle = Clock_handle(pClock);
+    Clock_Handle handle = Clock_handle(pClock);
 
-  // Start clock instance
-  Clock_start(handle);
+    // Start clock instance
+    Clock_start(handle);
 }
 
 /*********************************************************************
@@ -167,25 +176,25 @@ void Util_startClock(Clock_Struct *pClock)
  */
 void Util_restartClock(Clock_Struct *pClock, uint32_t clockTimeout)
 {
-  uint32_t clockTicks;
-  Clock_Handle handle;
+    uint32_t clockTicks;
+    Clock_Handle handle;
 
-  handle = Clock_handle(pClock);
+    handle = Clock_handle(pClock);
 
-  if (Clock_isActive(handle))
-  {
-    // Stop clock first
-    Clock_stop(handle);
-  }
+    if (Clock_isActive(handle))
+    {
+        // Stop clock first
+        Clock_stop(handle);
+    }
 
-  // Convert timeout in milliseconds to ticks.
-  clockTicks = clockTimeout * (1000 / Clock_tickPeriod);
+    // Convert timeout in milliseconds to ticks.
+    clockTicks = clockTimeout * (1000 / Clock_tickPeriod);
 
-  // Set the initial timeout
-  Clock_setTimeout(handle, clockTicks);
+    // Set the initial timeout
+    Clock_setTimeout(handle, clockTicks);
 
-  // Start clock instance
-  Clock_start(handle);
+    // Start clock instance
+    Clock_start(handle);
 }
 
 /*********************************************************************
@@ -196,14 +205,14 @@ void Util_restartClock(Clock_Struct *pClock, uint32_t clockTimeout)
  * @param   pClock - pointer to clock struct
  *
  * @return  TRUE if Clock is currently active
-            FALSE otherwise
+ FALSE otherwise
  */
 bool Util_isActive(Clock_Struct *pClock)
 {
-  Clock_Handle handle = Clock_handle(pClock);
+    Clock_Handle handle = Clock_handle(pClock);
 
-  // Start clock instance
-  return Clock_isActive(handle);
+    // Start clock instance
+    return Clock_isActive(handle);
 }
 
 /*********************************************************************
@@ -217,10 +226,10 @@ bool Util_isActive(Clock_Struct *pClock)
  */
 void Util_stopClock(Clock_Struct *pClock)
 {
-  Clock_Handle handle = Clock_handle(pClock);
+    Clock_Handle handle = Clock_handle(pClock);
 
-  // Stop clock instance
-  Clock_stop(handle);
+    // Stop clock instance
+    Clock_stop(handle);
 }
 
 /*********************************************************************
@@ -234,28 +243,28 @@ void Util_stopClock(Clock_Struct *pClock)
  */
 void Util_rescheduleClock(Clock_Struct *pClock, uint32_t clockPeriod)
 {
-  bool running;
-  uint32_t clockTicks;
-  Clock_Handle handle;
+    bool running;
+    uint32_t clockTicks;
+    Clock_Handle handle;
 
-  handle = Clock_handle(pClock);
-  running = Clock_isActive(handle);
+    handle = Clock_handle(pClock);
+    running = Clock_isActive(handle);
 
-  if (running)
-  {
-    Clock_stop(handle);
-  }
+    if (running)
+    {
+        Clock_stop(handle);
+    }
 
-  // Convert period in milliseconds to ticks.
-  clockTicks = clockPeriod * (1000 / Clock_tickPeriod);
+    // Convert period in milliseconds to ticks.
+    clockTicks = clockPeriod * (1000 / Clock_tickPeriod);
 
-  Clock_setTimeout(handle, clockTicks);
-  Clock_setPeriod(handle, clockTicks);
+    Clock_setTimeout(handle, clockTicks);
+    Clock_setPeriod(handle, clockTicks);
 
-  if (running)
-  {
-    Clock_start(handle);
-  }
+    if (running)
+    {
+        Clock_start(handle);
+    }
 }
 
 /*********************************************************************
@@ -263,69 +272,64 @@ void Util_rescheduleClock(Clock_Struct *pClock, uint32_t clockPeriod)
  *
  * @brief   Initialize an RTOS queue to hold messages to be processed.
  *
- * @param   pQueue - pointer to queue instance structure.
- *
  * @return  A queue handle.
  */
-Queue_Handle Util_constructQueue(Queue_Struct *pQueue)
+void Util_constructQueue()
 {
-  // Construct a Queue instance.
-  Queue_construct(pQueue, NULL);
+    // Construct a Queue instance.
+    Queue_construct(&appMsg, NULL);
 
-  return Queue_handle(pQueue);
+    appMsgQueue = Queue_handle(&appMsg);
 }
 
 /*********************************************************************
- * @fn      Util_enqueueMsg
+ * @fn      Util_putMsg2Queue
  *
  * @brief   Creates a queue node and puts the node in RTOS queue.
  *
  * @param   msgQueue - queue handle.
- * @param   event - thread's event processing handle that queue is
- *                associated with.
  * @param   pMsg - pointer to message to be queued
  *
  * @return  TRUE if message was queued, FALSE otherwise.
  */
-uint8_t Util_enqueueMsg(Queue_Handle msgQueue,
-                        Event_Handle event,
-                        uint8_t *pMsg)
+static uint8_t Util_putQueueMsg(Queue_Handle msgQueue,
+                                Event_Handle eventSyncHandle, uint8_t *pMsg)
 {
-  queueRec_t *pRec;
+    queueRec_t *pRec;
 
-  // Allocated space for queue node.
+    // Allocated space for queue node.
 #ifdef USE_ICALL
-  if ((pRec = ICall_malloc(sizeof(queueRec_t))))
+    if ((pRec = ICall_malloc(sizeof(queueRec_t))))
 #else
-  if ((pRec = (queueRec_t *)malloc(sizeof(queueRec_t))))
+    if ((pRec = (queueRec_t *)malloc(sizeof(queueRec_t))))
 #endif
-  {
-    pRec->pData = pMsg;
-
-    // This is an atomic operation
-    Queue_put(msgQueue, &pRec->_elem);
-
-    // Wake up the application thread event handler.
-    if (event)
     {
-      Event_post(event, UTIL_QUEUE_EVENT_ID);
+        pRec->pData = pMsg;
+
+        // This is an atomic operation
+        Queue_put(msgQueue, &pRec->_elem);
+
+        // Wake up the application thread event handler.
+        if (eventSyncHandle)
+        {
+            Event_post(eventSyncHandle, UTIL_QUEUE_EVENT_ID);
+        }
+
+        return TRUE;
     }
 
-    return TRUE;
-  }
-
-  // Free the message.
+    // Free the message.
 #ifdef USE_ICALL
-  ICall_free(pMsg);
+    ICall_free(pMsg);
 #else
-  free(pMsg);
+    free(pMsg);
 #endif
 
-  return FALSE;
+    return FALSE;
 }
 
 /*********************************************************************
- * @fn      Util_dequeueMsg
+ * @fn      Util_getQueueMsg
  *
  * @brief   Dequeues the message from the RTOS queue.
  *
@@ -333,26 +337,44 @@ uint8_t Util_enqueueMsg(Queue_Handle msgQueue,
  *
  * @return  pointer to dequeued message, NULL otherwise.
  */
-uint8_t *Util_dequeueMsg(Queue_Handle msgQueue)
+static uint8_t *Util_getQueueMsg(Queue_Handle msgQueue)
 {
-  queueRec_t *pRec = Queue_get(msgQueue);
+    queueRec_t *pRec = Queue_get(msgQueue);
 
-  if (pRec != (queueRec_t *)msgQueue)
-  {
-    uint8_t *pData = pRec->pData;
+    if (pRec != (queueRec_t *) msgQueue)
+    {
+        uint8_t *pData = pRec->pData;
 
-    // Free the queue node
-    // Note:  this does not free space allocated by data within the node.
+        // Free the queue node
+        // Note:  this does not free space allocated by data within the node.
 #ifdef USE_ICALL
-    ICall_free(pRec);
+        ICall_free(pRec);
 #else
-    free(pRec);
+        free(pRec);
 #endif
 
-    return pData;
-  }
+        return pData;
+    }
 
-  return NULL;
+    return NULL;
+}
+
+/*********************************************************************
+ * @fn      Util_listenEventMsg
+ *
+ * @brief   Listen t.
+ *
+ * @param   msgQueue - queue handle.
+ *
+ * @return  pointer to dequeued message, NULL otherwise.
+ */
+uint32_t Util_listenEventMsg(uint32_t event_mask)
+{
+    uint32_t received_events;
+
+    received_events = Event_pend(eventSyncHandle, Event_Id_NONE, event_mask,
+                                 ICALL_TIMEOUT_FOREVER);
+    return received_events;
 }
 
 /*********************************************************************
@@ -367,25 +389,25 @@ uint8_t *Util_dequeueMsg(Queue_Handle msgQueue)
  */
 char *Util_convertBdAddr2Str(uint8_t *pAddr)
 {
-  uint8_t     charCnt;
-  char        hex[] = "0123456789ABCDEF";
-  static char str[(2*B_ADDR_LEN)+3];
-  char        *pStr = str;
+    uint8_t charCnt;
+    char hex[] = "0123456789ABCDEF";
+    static char str[(2 * B_ADDR_LEN) + 3];
+    char *pStr = str;
 
-  *pStr++ = '0';
-  *pStr++ = 'x';
+    *pStr++ = '0';
+    *pStr++ = 'x';
 
-  // Start from end of addr
-  pAddr += B_ADDR_LEN;
+    // Start from end of addr
+    pAddr += B_ADDR_LEN;
 
-  for (charCnt = B_ADDR_LEN; charCnt > 0; charCnt--)
-  {
-    *pStr++ = hex[*--pAddr >> 4];
-    *pStr++ = hex[*pAddr & 0x0F];
-  }
-  *pStr = NULL;
+    for (charCnt = B_ADDR_LEN; charCnt > 0; charCnt--)
+    {
+        *pStr++ = hex[*--pAddr >> 4];
+        *pStr++ = hex[*pAddr & 0x0F];
+    }
+    *pStr = NULL;
 
-  return str;
+    return str;
 }
 
 /*********************************************************************
@@ -401,26 +423,64 @@ char *Util_convertBdAddr2Str(uint8_t *pAddr)
  */
 uint8_t Util_isBufSet(uint8_t *pBuf, uint8_t pattern, uint16_t len)
 {
-  uint8_t result = FALSE;
+    uint8_t result = FALSE;
 
-  if (pBuf)
-  {
-    result = TRUE;
-
-    for(uint16_t i = 0; i < len; i++)
+    if (pBuf)
     {
-      if (pBuf[i] != pattern)
-      {
-        // Buffer does not match pattern.
-        result = FALSE;
-        break;
-      }
-    }
-  }
+        result = TRUE;
 
-  return (result);
+        for (uint16_t i = 0; i < len; i++)
+        {
+            if (pBuf[i] != pattern)
+            {
+                // Buffer does not match pattern.
+                result = FALSE;
+                break;
+            }
+        }
+    }
+
+    return (result);
 }
 
+/*********************************************************************
+ * @fn      Util_enqueueAppMsg
+ *
+ * @brief   Creates a message and puts the message in RTOS queue.
+ *
+ * @param   event - message event.
+ * @param   state - message state.
+ * @param   pData - message data pointer.
+ *
+ * @return  TRUE or FALSE
+ */
+status_t Util_enqueueAppMsg(uint8_t event, uint8_t state,
+                                         uint8_t *pData)
+{
+    uint8_t success;
+    appEvt_t *pMsg = ICall_malloc(sizeof(appEvt_t));
+
+    // TODO: add semaphore
+
+    // Create dynamic pointer to message.
+    if (pMsg)
+    {
+        pMsg->hdr.event = event;
+        pMsg->hdr.state = state;
+        pMsg->pData = pData;
+
+        // Enqueue the message.
+        success = Util_putQueueMsg(appMsgQueue, eventSyncHandle, (uint8_t *) pMsg);
+        return (success) ? SUCCESS : FAILURE;
+    }
+
+    return (bleMemAllocError);
+}
+
+uint8_t *Util_dequeueAppMsg()
+{
+    return Util_getQueueMsg(appMsgQueue);
+}
 
 /*********************************************************************
-*********************************************************************/
+ *********************************************************************/

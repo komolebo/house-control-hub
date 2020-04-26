@@ -48,7 +48,7 @@ typedef enum
 {
     CENTRAL_MSG_DISCOVER,
     CENTRAL_MSG_RESET_REGISTRATION
-} cmdCentral_t;
+}  cmdCentral_t;
 
 
 typedef struct
@@ -82,7 +82,7 @@ typedef struct
 {
     packageHeader_t     header;
     packageMsgData_t    data;
-} serialProtoMsg_t;
+} __attribute__ ((packed)) serialProtoMsg_t;
 
 
 /*********************************************************************
