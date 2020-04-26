@@ -75,7 +75,7 @@ void process_rx_ipc_msg(uint8_t *data, size_t len)
                        (uint8_t *) &pSerialProtoMsg->data.peripheral_msg_data,
                        sizeof(msgPeripheral_t));
 
-                if (Util_enqueueAppMsg(EVT_DEVICE_GATT_REQ, SUCCESS,
+                if (Util_enqueueAppMsg(EVT_IPC_PERIPHERAL_REQ, SUCCESS,
                                        (uint8_t *) pData) != SUCCESS)
                 {
                     ICall_free(pData);

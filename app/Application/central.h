@@ -23,18 +23,20 @@
  * CONSTANTS
  */
 // Application events
-#define EVT_IPC_CENTRAL_CMD         0x00
-#define EVT_IPC_PERIPHERAL      0x01
-#define EVT_SCAN_ENABLED        0x02
-#define EVT_SCAN_DISABLED       0x03
-#define EVT_ADV_REPORT          0x04
-#define EVT_SVC_DISC            0x05
-#define EVT_READ_RSSI           0x06
-#define EVT_PAIR_STATE          0x07
-#define EVT_PASSCODE_NEEDED     0x08
-#define EVT_READ_RPA            0x09
-#define EVT_INSUFFICIENT_MEM    0x0A
-#define EVT_DEVICE_GATT_REQ     0x0F
+#define EVT_IPC_CENTRAL_CMD     0x00
+#define EVT_IPC_PERIPHERAL_REQ  0x01
+#define EVT_SCAN_ENABLE         0x02
+#define EVT_SCAN_DISABLE        0x03
+#define EVT_SCAN_ENABLED        0x04
+#define EVT_SCAN_DISABLED       0x05
+#define EVT_ADV_REPORT          0x06
+#define EVT_SVC_DISC            0x07
+#define EVT_READ_RSSI           0x08
+#define EVT_PAIR_STATE          0x09
+#define EVT_PASSCODE_NEEDED     0x0A
+#define EVT_READ_RPA            0x0B
+#define EVT_INSUFFICIENT_MEM    0x0C
+
 
 // Maximum number of scan results.
 // Note: this value cannot be greater than the number of items reserved in

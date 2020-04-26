@@ -17,13 +17,13 @@
 
 /* Driver Header files */
 #include <ti/drivers/GPIO.h>
-//#include <ti/drivers/UART.h>
 
 #if TEST
 #include <ti/sysbios/knl/Semaphore.h>
 #include <ti/sysbios/BIOS.h>
-#include <xdc/runtime/Error.h>
+//#include <xdc/runtime/Error.h>
 #include "util.h"
+#include <uartlog/UartLog.h>
 #endif
 /*********************************************************************
  * CONSTANTS
@@ -32,10 +32,10 @@
 #define UART_TASK_PRIORITY                      (1)
 
 #ifndef UART_TASK_STACK_SIZE
-#define UART_TASK_STACK_SIZE                    (2048)
+#define UART_TASK_STACK_SIZE                    (512)
 #endif
 
-#define UART_HANDLER_BAUD_RATE                  (115200)  /* TODO: increase to 115200 */
+#define UART_HANDLER_BAUD_RATE                  (115200)
 
 #define IPC_MSG_SIZE                            (sizeof(serialProtoMsg_t))
 
@@ -62,12 +62,9 @@ Task_Struct uartTask;
  */
 static uint8_t uartTaskStack[UART_TASK_STACK_SIZE];
 
+static uint8_t rxBuffer[IPC_MSG_SIZE] = { 0 };
 
-// Uart configuration
-static UART_Params uartParams;
-UART_Handle uartHandle;
-
-
+static UART_Handle uartHandle;
 
 /*********************************************************************
  * PUBLIC FUNCTIONS
@@ -75,25 +72,28 @@ UART_Handle uartHandle;
 
 void UartHandler_init()
 {
+    // UART handle
+    UART_Params uartParams;
+
     /* Call driver init functions */
     GPIO_init();
-    UART_init();
 
     /* Create a UART with data processing off. */
     UART_Params_init(&uartParams);
 
-    /* Establist uart TX/RX parameters */
+    /* Establish UART TX/RX parameters */
     {
         uartParams.baudRate = UART_HANDLER_BAUD_RATE;
-        uartParams.writeDataMode = UART_DATA_TEXT;
-        uartParams.readDataMode = UART_DATA_TEXT;
+        uartParams.writeDataMode = UART_DATA_BINARY;
+        uartParams.readDataMode = UART_DATA_BINARY;
         uartParams.writeMode = UART_MODE_BLOCKING;
         uartParams.readMode = UART_MODE_BLOCKING;
         uartParams.readReturnMode = UART_RETURN_FULL;
         uartParams.readEcho = UART_ECHO_OFF;
     }
 
-    uartHandle = UART_open(Board_UART0, &uartParams);
+    UART_init();
+    UartLog_init(uartHandle = UART_open(Board_UART0, &uartParams));
 
     if (uartHandle == NULL)
     {
@@ -103,52 +103,28 @@ void UartHandler_init()
 
 static void UartHandler_Task()
 {
-    uint8_t rxBuffer[IPC_MSG_SIZE] = { 0 };
-//    serialProtoMsg_t
-
     int32_t uart_status;
-
-#if 0
-    Semaphore_Handle semaphore0;
-    Semaphore_Params semaphoreParams;
-    Error_Block eb = { 0 };
-
-    Semaphore_Params_init(&semaphoreParams);
-    semaphore0 = Semaphore_create(0, &semaphoreParams, &eb);
-
-#endif
-    uint8_t response[IPC_MSG_SIZE + 2];
-    response[0] = response[IPC_MSG_SIZE + 1] = '\n';
 
     for (;;)
     {
-//        Semaphore_pend(semaphore0, BIOS_WAIT_FOREVER);
         uart_status = UART_read(uartHandle, &rxBuffer, IPC_MSG_SIZE);
-
         if (uart_status != UART_STATUS_ERROR)
         {
             /* Decode and send here an event to application */
             process_rx_ipc_msg(rxBuffer, IPC_MSG_SIZE);
         }
-        // debug echo
-        memcpy(&response[1], &rxBuffer, IPC_MSG_SIZE);
 
-//        UART_write(uartHandle, "Next line:\n", 12);
-
+        /* clear whole buffer */
         memset(rxBuffer, 0, IPC_MSG_SIZE);
     }
 }
 
 static void uartHandlerFxn(UArg arg0, UArg arg1)
 {
+    /* initialize UART HW */
     UartHandler_init();
 
-
-#if TEST
-    const char echoPrompt[] = "Testing:\r\n";
-//    UART_write(uartHandle, echoPrompt, sizeof(echoPrompt));
-#endif
-
+    /* task cyclic call */
     UartHandler_Task();
 }
 

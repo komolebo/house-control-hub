@@ -35,20 +35,12 @@
 
 #include "ipc/uart_handler.h"
 
-//#include <uartlog/UartLog.h>
+//#include "UartLog.h"
+#include <uartlog/UartLog.h>
 #include "ipc/msg_handler.h"
-
 /*********************************************************************
  * CONSTANTS
  */
-
-/* Temporary close traces */
-void Log_info0(uint8_t * s) { UART_write(uartHandle, s, sizeof(s)); }
-void Log_info1(uint8_t * s,  char c) { UART_write(uartHandle, s, sizeof(s)); }
-void Log_info2(uint8_t * s,  char c,  char c1) { UART_write(uartHandle, s, sizeof(s)); }
-void Log_info3(uint8_t * s,  char c,  char c1,  char c2) {UART_write(uartHandle, s, sizeof(s)); }
-void Log_info4(uint8_t * s,  char c,  char c1,  char c2,  char c3) {UART_write(uartHandle, s, sizeof(s)); }
-
 
 // Task configuration
 #define CENTRAL_TASK_PRIORITY                     1
@@ -498,8 +490,7 @@ void Central_createTask()
 
     Task_construct(&centralTask, Central_taskFxn, &taskParams, NULL);
 }
-#include <stdio.h>
-#include <stdlib.h>
+
 /*********************************************************************
  * @fn      Central_processAppMsg
  *
@@ -515,23 +506,22 @@ static void Central_processAppMsg(appEvt_t *pMsg)
 
     switch (pMsg->hdr.event)
     {
+    case EVT_IPC_CENTRAL_CMD:
+        Central_processHubReq((msgCentral_t *)pMsg->pData);
+        break;
+
     case EVT_ADV_REPORT:
     {
-        UART_write(uartHandle, "EVT_ADV_REPORT\n", 25);
         GapScan_Evt_AdvRpt_t* pAdvRpt = (GapScan_Evt_AdvRpt_t*) (pMsg->pData);
 
 #if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
-        if (SimpleCentral_findSvcUuid(CONFIG_SERVICE_SERV_UUID,
+        if (SimpleCentral_findSvcUuid(0xFFF0 /*CONFIG_SERVICE_SERV_UUID*/, // TODO: replace with actual UUID
                         pAdvRpt->pData, pAdvRpt->dataLen))
         {
             Central_addScanInfo(pAdvRpt->addr, pAdvRpt->addrType);
             Log_info1("Discovered: %s",
                       (uintptr_t)Util_convertBdAddr2Str(pAdvRpt->addr));
         }
-#else // !DEFAULT_DEV_DISC_BY_SVC_UUID
-        Display_printf(dispHandle, SC_ROW_NON_CONN, 0, "Discovered: %s",
-                       Util_convertBdAddr2Str(pAdvRpt->addr));
-#endif // DEFAULT_DEV_DISC_BY_SVC_UUID
 
         // Free report payload data
         if (pAdvRpt->pData != NULL)
@@ -541,14 +531,22 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         break;
     }
 
+    case EVT_SCAN_ENABLE:
+        Log_info0("Enable scan");
+        GapScan_enable(0, DEFAULT_SCAN_DURATION, DEFAULT_MAX_SCAN_RES);
+        break;
+
+    case EVT_SCAN_DISABLE:
+        GapScan_disable();
+        break;
+
     case EVT_SCAN_ENABLED:
-        UART_write(uartHandle, "EVT_SCAN_ENABLED\n", 25);
         Log_info0("Discovering...");
         break;
 
     case EVT_SCAN_DISABLED:
     {
-        UART_write(uartHandle, "EVT_SCAN_DISABLED\n", 25);
+        Log_info0("Scan disabled");
         uint8_t numReport;
         uint8_t i;
         static uint8_t* pAddrs = NULL;
@@ -634,13 +632,13 @@ static void Central_processAppMsg(appEvt_t *pMsg)
     }
 
     case EVT_SVC_DISC:
-        UART_write(uartHandle, "EVT_SVC_DISC\n", 25);
+        Log_info0("Start service discovery");
         Central_startSvcDiscovery();
         break;
 
     case EVT_READ_RSSI:
     {
-        UART_write(uartHandle, "EVT_READ_RSSI\n", 25);
+        Log_info0("Read RSSI event");
         uint8_t connIndex = pMsg->hdr.state;
         uint16_t connHandle = connList[connIndex].connHandle;
 
@@ -660,7 +658,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         // Pairing event
     case EVT_PAIR_STATE:
     {
-        UART_write(uartHandle, "EVT_PAIR_STATE\n", 25);
+        Log_info0("Process pair state");
         Central_processPairState(pMsg->hdr.state,
                                        (scPairStateData_t*) (pMsg->pData));
         break;
@@ -669,7 +667,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         // Passcode event
     case EVT_PASSCODE_NEEDED:
     {
-        UART_write(uartHandle, "EVT_PASSCODE_NEEDED\n", 25);
+        Log_info0("Pass code needed");
         Central_processPasscode((scPasscodeData_t *) (pMsg->pData));
         break;
     }
@@ -677,11 +675,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
 #if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
     case EVT_READ_RPA:
     {
-        if(Util_enqueueAppMsg(EVT_INSUFFICIENT_MEM, SUCCESS, NULL) != SUCCESS)
-        {
-
-        }
-        UART_write(uartHandle, "EVT_READ_RPA\n", 25);
+        Log_info0("Reading RPA");
         uint8_t* pRpaNew;
 
         // Read the current RPA.
@@ -700,7 +694,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         // Insufficient memory
     case EVT_INSUFFICIENT_MEM:
     {
-        UART_write(uartHandle, "EVT_INSUFFICIENT_MEM\n", 22);
+        Log_info0("Insufficient memory!!");
         // We are running out of memory.
         Log_info0("Insufficient Memory");
 
@@ -709,19 +703,10 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         break;
     }
 
-    case EVT_IPC_CENTRAL_CMD:
-        Central_processHubReq((msgCentral_t *)pMsg->pData);
-        UART_write(uartHandle, "EVT_IPC_CENTRAL\n", 17);
+    case EVT_IPC_PERIPHERAL_REQ:
+        Log_info0("Processing IPC request for peripheral's GATT");
         break;
 
-    case EVT_IPC_PERIPHERAL:
-        UART_write(uartHandle, "EVT_IPC_PERIPHE\n", 17);
-        GapScan_disable();
-        break;
-
-    case EVT_DEVICE_GATT_REQ:
-        UART_write(uartHandle, "EVT_DEVICE_GATT_REQ\n", 21);
-        break;
     default:
         // Do nothing.
         break;
@@ -1252,7 +1237,7 @@ void Central_clockHandler(UArg arg)
         // Restart timer
         Util_startClock(&clkRpaRead);
         // Let the application handle the event
-//        Util_enqueueAppMsg(EVT_READ_RPA, 0, NULL);
+        Util_enqueueAppMsg(EVT_READ_RPA, 0, NULL);
         break;
 
     default:
@@ -1346,19 +1331,12 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
 
         scMaxPduSize = pPkt->dataPktLen;
 
-//        // Enable "Discover Devices", "Set Scanning PHY", and "Set Address Type"
-//        // in the main menu
-//        tbm_setItemStatus(&scMenuMain, ITEM_STARTDISC | SC_ITEM_SCANPHY,
-//                          SC_ITEM_NONE);
-//
-//        Display_printf(dispHandle, SC_ROW_NON_CONN, 0, "Initialized");
-//        Display_printf(dispHandle, SC_ROW_NUM_CONN, 0, "Num Conns: %d",
-//                       numConn);
-//
-//        // Display device address
-//        Display_printf(dispHandle, SC_ROW_IDA, 0, "%s Addr: %s",
-//                       (addrMode <= ADDRMODE_RANDOM) ? "Dev" : "ID",
-//                       Util_convertBdAddr2Str(pPkt->devAddr));
+        Log_info0("Initialized");
+        Log_info1("Num Conns: %d", numConn);
+
+        // Display device address
+        Log_info2("%s Addr: %s", (addrMode <= ADDRMODE_RANDOM) ? "Dev" : "ID",
+                  Util_convertBdAddr2Str(pPkt->devAddr));
 
 #if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
         if (addrMode > ADDRMODE_RANDOM)
@@ -1378,21 +1356,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
 
     case GAP_CONNECTING_CANCELLED_EVENT:
     {
-//        uint16_t itemsToEnable = SC_ITEM_SCANPHY | SC_ITEM_STARTDISC
-//                | SC_ITEM_CONNECT;
-//
-//        if (numConn > 0)
-//        {
-//            itemsToEnable |= SC_ITEM_SELECTCONN;
-//        }
-
         Log_info0("Conneting attempt cancelled");
-
-        // Enable "Discover Devices", "Connect To", and "Set Scanning PHY"
-        // and disable everything else.
-//        tbm_setItemStatus(&scMenuMain, itemsToEnable,
-//                          SC_ITEM_ALL & ~itemsToEnable);
-
         break;
     }
 
@@ -1814,7 +1778,7 @@ static void Central_processHubReq(msgCentral_t *ipcMsg)
 {
     switch (ipcMsg->cmd) {
         case CENTRAL_MSG_DISCOVER:
-            Util_enqueueAppMsg(EVT_SVC_DISC, SUCCESS, NULL);
+            Util_enqueueAppMsg(EVT_SCAN_ENABLE, SUCCESS, NULL);
             break;
         case CENTRAL_MSG_RESET_REGISTRATION:
 

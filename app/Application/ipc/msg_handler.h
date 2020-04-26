@@ -24,7 +24,7 @@
 /*********************************************************************
  * CONSTANTS
  */
-#define IPC_MSG_DATA_MAX_SIZE       (48)
+#define IPC_MSG_MAX_DATA_SIZE       (48)
 
 
 /*********************************************************************
@@ -55,14 +55,16 @@ typedef struct
 {
     uint16_t        conn_mask;
     uint8_t         uuid[UUID_DATA_LEN];
-    uint8_t         data[IPC_MSG_DATA_MAX_SIZE];
+    uint16_t        len;
+    uint8_t         data[IPC_MSG_MAX_DATA_SIZE];
 } msgPeripheral_t;
 
 
 typedef struct
 {
     cmdCentral_t    cmd;
-    uint8_t         data[IPC_MSG_DATA_MAX_SIZE];
+    uint16_t        len;
+    uint8_t         data[IPC_MSG_MAX_DATA_SIZE];
 } msgCentral_t;
 
 

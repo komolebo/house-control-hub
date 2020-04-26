@@ -48,7 +48,7 @@
  * INCLUDES
  */
 
-#include <xdc/runtime/Error.h>
+//#include <xdc/runtime/Error.h>
 
 #include <ti/drivers/Power.h>
 #include <ti/drivers/power/PowerCC26XX.h>
@@ -146,9 +146,9 @@ int main()
   /* Start tasks of external images - Priority 5 */
   ICall_createRemoteTasks();
 
-  UartHandler_createTask();
-
   Util_constructQueue();
+
+  UartHandler_createTask();
 
   Central_createTask();
 
@@ -259,10 +259,10 @@ void AssertHandler(uint8 assertCause, uint8 assertSubcause)
  *
  * @return      None.
  */
-void smallErrorHook(Error_Block *eb)
-{
-  for (;;);
-}
+//void smallErrorHook(Error_Block *eb)
+//{
+//  for (;;);
+//}
 
 
 /*******************************************************************************
