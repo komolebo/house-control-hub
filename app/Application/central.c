@@ -46,7 +46,7 @@
 #define CENTRAL_TASK_PRIORITY                     1
 
 #ifndef CENTRAL_TASK_STACK_SIZE
-#define CENTRAL_TASK_STACK_SIZE                   2048
+#define CENTRAL_TASK_STACK_SIZE                   1024
 #endif
 
 // TRUE to filter discovery results on desired service UUID
@@ -197,6 +197,7 @@ static status_t Central_CancelRssi(uint16_t connHandle);
 static char* SimpleCentral_getConnAddrStr(uint16_t connHandle);
 static uint8_t Central_removeConnInfo(uint16_t connHandle);
 static void Central_processHubReq(msgCentral_t *ipcMsg);
+static bool connectScannedDevice(uint8_t index);
 /*********************************************************************
  * LOCAL VARIABLES
  */
@@ -230,7 +231,7 @@ static uint8 rpa[B_ADDR_LEN] = {0};
 static Clock_Struct clkRpaRead;
 
 // Connection handle of current connection
-static uint16_t scConnHandle = CONNHANDLE_INVALID;
+static uint16_t connHandle = CONNHANDLE_INVALID;
 
 // Number of connected devices
 static uint8_t numConn = 0;
@@ -506,21 +507,26 @@ static void Central_processAppMsg(appEvt_t *pMsg)
 
     switch (pMsg->hdr.event)
     {
+    /* Parse any IPC message to application event */
     case EVT_IPC_CENTRAL_CMD:
-        Central_processHubReq((msgCentral_t *)pMsg->pData);
+        Central_processHubReq((msgCentral_t *) pMsg->pData);
+        break;
+
+    case EVT_IPC_PERIPHERAL_REQ:
+        /* route here peripheral request to device's GATT */
         break;
 
     case EVT_ADV_REPORT:
     {
         GapScan_Evt_AdvRpt_t* pAdvRpt = (GapScan_Evt_AdvRpt_t*) (pMsg->pData);
 
-#if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
         if (SimpleCentral_findSvcUuid(0xFFF0 /*CONFIG_SERVICE_SERV_UUID*/, // TODO: replace with actual UUID
                         pAdvRpt->pData, pAdvRpt->dataLen))
         {
             Central_addScanInfo(pAdvRpt->addr, pAdvRpt->addrType);
             Log_info1("Discovered: %s",
                       (uintptr_t)Util_convertBdAddr2Str(pAdvRpt->addr));
+            connectScannedDevice(0);
         }
 
         // Free report payload data
@@ -530,15 +536,6 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         }
         break;
     }
-
-    case EVT_SCAN_ENABLE:
-        Log_info0("Enable scan");
-        GapScan_enable(0, DEFAULT_SCAN_DURATION, DEFAULT_MAX_SCAN_RES);
-        break;
-
-    case EVT_SCAN_DISABLE:
-        GapScan_disable();
-        break;
 
     case EVT_SCAN_ENABLED:
         Log_info0("Discovering...");
@@ -694,7 +691,6 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         // Insufficient memory
     case EVT_INSUFFICIENT_MEM:
     {
-        Log_info0("Insufficient memory!!");
         // We are running out of memory.
         Log_info0("Insufficient Memory");
 
@@ -702,10 +698,6 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         GapScan_disable();
         break;
     }
-
-    case EVT_IPC_PERIPHERAL_REQ:
-        Log_info0("Processing IPC request for peripheral's GATT");
-        break;
 
     default:
         // Do nothing.
@@ -899,6 +891,9 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
  */
 static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
 {
+    Log_info2("Gatt event received, discState: %d, pMsg->method: 0x%x ",
+              discState, pMsg->method);
+
     if (discState == BLE_DISC_STATE_MTU)
     {
         // MTU size response received, discover simple service
@@ -906,8 +901,9 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
         {
             uint8_t uuid[ATT_BT_UUID_SIZE] =
                     {
-                      LO_UINT16(CONFIG_SERVICE_SERV_UUID), HI_UINT16(
-                              CONFIG_SERVICE_SERV_UUID)
+//                      LO_UINT16(CONFIG_SERVICE_SERV_UUID), HI_UINT16(
+//                              CONFIG_SERVICE_SERV_UUID)
+                         LO_UINT16(0xFFF0), HI_UINT16(0xFFF0)
                     };
 
             discState = BLE_DISC_STATE_SVC;
@@ -957,7 +953,7 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
         if ((pMsg->method == ATT_READ_BY_TYPE_RSP)
                 && (pMsg->msg.readByTypeRsp.numPairs > 0))
         {
-            uint8_t connIndex = Central_getConnIndex(scConnHandle);
+            uint8_t connIndex = Central_getConnIndex(connHandle);
 
             // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
             CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
@@ -1006,7 +1002,7 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
         {
             if (pMsg->method == ATT_ERROR_RSP)
             {
-                Log_info1("Read Error %d", pMsg->msg.errorRsp.errCode);
+                Log_error1("Read Error %d", pMsg->msg.errorRsp.errCode);
             }
             else
             {
@@ -1020,7 +1016,7 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
         {
             if (pMsg->method == ATT_ERROR_RSP)
             {
-                Log_info1("Write Error %d", pMsg->msg.errorRsp.errCode);
+                Log_error1("Write Error %d", pMsg->msg.errorRsp.errCode);
             }
             else
             {
@@ -1036,7 +1032,7 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
             // The app is informed in case it wants to drop the connection.
 
             // Display the opcode of the message that caused the violation.
-            Log_info1("FC Violated: %d", pMsg->msg.flowCtrlEvt.opcode);
+            Log_error1("FC Violated: %d", pMsg->msg.flowCtrlEvt.opcode);
         }
         else if (pMsg->method == ATT_MTU_UPDATED_EVENT)
         {
@@ -1335,8 +1331,9 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Log_info1("Num Conns: %d", numConn);
 
         // Display device address
-        Log_info2("%s Addr: %s", (addrMode <= ADDRMODE_RANDOM) ? "Dev" : "ID",
-                  Util_convertBdAddr2Str(pPkt->devAddr));
+        Log_info2("%s Addr: %s",
+                  (uintptr_t )((addrMode <= ADDRMODE_RANDOM) ? "Dev" : "ID"),
+                  (uintptr_t )Util_convertBdAddr2Str(pPkt->devAddr));
 
 #if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
         if (addrMode > ADDRMODE_RANDOM)
@@ -1554,6 +1551,7 @@ static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg)
  */
 static void Central_startSvcDiscovery(void)
 {
+    Log_info0("Starting discovery");
     attExchangeMTUReq_t req;
 
     // Initialize cached handles
@@ -1566,7 +1564,8 @@ static void Central_startSvcDiscovery(void)
 
     // ATT MTU size should be set to the minimum of the Client Rx MTU
     // and Server Rx MTU values
-    VOID GATT_ExchangeMTU(scConnHandle, &req, selfEntity);
+//    VOID GATT_ExchangeMTU(connHandle, &req, selfEntity);
+    VOID GATT_ExchangeMTU(connList[0].connHandle, &req, selfEntity);
 }
 
 /*********************************************************************
@@ -1774,17 +1773,79 @@ static uint8_t Central_removeConnInfo(uint16_t connHandle)
     return i;
 }
 
+/*********************************************************************
+ * @fn      connectScannedDevice
+ *
+ * @brief   Establish a link to a peer device
+ *
+ * @param   index - item index from the menu
+ *
+ * @return  always true
+ */
+static bool connectScannedDevice(uint8_t index)
+{
+    GapInit_connect(scanList[index].addrType & MASK_ADDRTYPE_ID,
+                    scanList[index].addr, DEFAULT_INIT_PHY, 0);
+
+    Log_info1("Connecting to %s...",
+              (uintptr_t )Util_convertBdAddr2Str(scanList[index].addr));
+
+    return (true);
+}
+
+/*********************************************************************
+ * @fn      Central_GattRead
+ *
+ * @brief   GATT Read
+ *
+ * @param   index - item index from the menu
+ *
+ * @return  always true
+ */
+bool Central_GattRead(uint8_t index)
+{
+    Log_warning0("Gatt read called");
+    attReadReq_t req;
+    uint8_t connIndex = Central_getConnIndex(connList[0].connHandle);
+
+    // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
+    CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
+
+    req.handle = connList[0].charHandle;
+    GATT_ReadCharValue(connList[0].connHandle, &req, selfEntity);
+
+    return (true);
+}
+
 static void Central_processHubReq(msgCentral_t *ipcMsg)
 {
-    switch (ipcMsg->cmd) {
-        case CENTRAL_MSG_DISCOVER:
-            Util_enqueueAppMsg(EVT_SCAN_ENABLE, SUCCESS, NULL);
-            break;
-        case CENTRAL_MSG_RESET_REGISTRATION:
+    switch (ipcMsg->cmd)
+    {
+    case CENTRAL_MSG_DISCOVER:
+        GapScan_enable(0, DEFAULT_SCAN_DURATION, DEFAULT_MAX_SCAN_RES);
+        break;
 
-            break;
-        default:
-            break;
+    case CENTRAL_MSG_STOP_DISCOVERING:
+        GapScan_disable();
+        break;
+
+    case CENTRAL_MSG_CONNECT_DEVICE:
+        connectScannedDevice(0);
+        break;
+
+    case CENTRAL_MSG_DISCOVER_SERVICES:
+//        connHandle = connList[0].connHandle;
+        Util_enqueueAppMsg(EVT_SVC_DISC, SUCCESS, NULL);
+
+        break;
+
+    case CENTRAL_MSG_GATT_READ:
+        (void)Central_GattRead(0);
+        break;
+
+
+    default:
+        break;
     }
 }
 
