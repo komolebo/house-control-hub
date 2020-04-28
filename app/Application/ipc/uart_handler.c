@@ -37,9 +37,6 @@
 
 #define UART_HANDLER_BAUD_RATE                  (115200)
 
-#define IPC_MSG_SIZE                            (sizeof(serialProtoMsg_t))
-
-
 /*********************************************************************
  * GLOBAL VARIABLES
  */
@@ -62,7 +59,7 @@ Task_Struct uartTask;
  */
 static uint8_t uartTaskStack[UART_TASK_STACK_SIZE];
 
-static uint8_t rxBuffer[IPC_MSG_SIZE] = { 0 };
+static uint8_t rxBuffer[IPC_MAX_MSG_SIZE] = { 0 };
 
 static UART_Handle uartHandle;
 
@@ -107,15 +104,15 @@ static void UartHandler_Task()
 
     for (;;)
     {
-        uart_status = UART_read(uartHandle, &rxBuffer, IPC_MSG_SIZE);
+        uart_status = UART_read(uartHandle, &rxBuffer, IPC_MAX_MSG_SIZE);
         if (uart_status != UART_STATUS_ERROR)
         {
             /* Decode and send here an event to application */
-            process_ipc_msg(rxBuffer, IPC_MSG_SIZE);
+            process_ipc_msg(rxBuffer, IPC_MAX_MSG_SIZE);
         }
 
         /* clear whole buffer */
-        memset(rxBuffer, 0, IPC_MSG_SIZE);
+        memset(rxBuffer, 0, IPC_MAX_MSG_SIZE);
     }
 }
 

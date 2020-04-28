@@ -24,7 +24,11 @@
 /*********************************************************************
  * CONSTANTS
  */
-#define IPC_MSG_MAX_DATA_SIZE       (62)
+// Useful IPC data size
+#define IPC_MSG_MAX_DATA_SIZE       (61)
+
+// Full package size to be TX/RX'ed into/from IPC channel
+#define IPC_MAX_MSG_SIZE            (sizeof(serialProtoPkg_t))
 
 /*********************************************************************
  * TYPEDEFS
@@ -32,27 +36,33 @@
 
 typedef enum
 {
-    PACKAGE_CENTRAL_CMD,
-    PACKAGE_CENTRAL_RESP,
-    PACKAGE_PERIPHERY_READ_REQ,
-    PACKAGE_PERIPHERY_WRITE_REQ,
-    PACKAGE_PERIPHERY_READ_RESP,
-    PACKAGE_PERIPHERY_WRITE_RESP,
-    PACKAGE_PERIPHERAL_NOTIFICATION,
-    PACKAGE_PERIPHERAL_INDICATION,
-    PACKAGE_TYPE_COUNT
-} packageType_t;
+    PKG_CENTRAL_REQ,
+    PKG_CENTRAL_RESP,
+    PKG_PERIPHERY_REQ,
+    PKG_PERIPHERY_RESP,
+    PKG_PERIPHERY_UPDATES,
+    PKG_TYPE_COUNT
+} pkgType_t;
 
 typedef enum
 {
-    CENTRAL_CMD_DISCOVER_DEVICES,
-    CENTRAL_CMD_STOP_DEVICES_DISCOVER,
-    CENTRAL_CMD_CONNECT_DEVICE,
-    CENTRAL_CMD_DISCONNECT_DEVICE,
+    CENTRAL_MSG_DISCOVER_DEVICES,
+    CENTRAL_MSG_STOP_DEVICES_DISCOVER,
+    CENTRAL_MSG_CONNECT_DEVICE,
+    CENTRAL_MSG_DISCONNECT_DEVICE,
 //    CENTRAL_CMD_DISCOVER_SERVICES_AND_UUIDS,
-    CENTRAL_CMD_DISCOVER_DEVICE_UUIDS,
-    CENTRAL_CMD_RESET_REGISTRATION
-}  cmdCentral_t;
+    CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
+    CENTRAL_MSG_RESET_REGISTRATION
+}  msgCentral_t;
+
+typedef enum
+{
+    PERIPHERY_MSG_READ,
+    PERIPHERY_MSG_WRITE,
+    PERIPHERY_MSG_NOTIFY,
+    PERIPHERY_MSG_INDICATE,
+    PERIPHERY_MSG_COUNT
+}  msgPeriphery_t;
 
 
 typedef struct
@@ -66,13 +76,6 @@ typedef struct
     uint8_t *uuids[UUID_DATA_LEN];
 } cmdRspDataConnectDevice_t;
 
-typedef struct
-{
-    uint16_t conn_handle;
-//    uint8_t addr[B_ADDR_LEN];
-    uint16_t len;
-    uint8_t *uuids[UUID_DATA_LEN];
-} cmdRspDataDiscoverUuids_t;
 
 typedef struct
 {
@@ -81,38 +84,39 @@ typedef struct
 
 typedef struct
 {
+    msgPeriphery_t  msg;
     uint16_t        conn_mask;
     uint8_t         uuid[UUID_DATA_LEN];
     uint16_t        len;
     uint8_t         data[IPC_MSG_MAX_DATA_SIZE];
-} __attribute__ ((packed)) msgPeripheral_t;
+} __attribute__ ((packed)) pkgDataPeriphery_t;
 
 
 typedef struct
 {
-    cmdCentral_t    cmd;
+    msgCentral_t    msg;
     uint16_t        len;
     uint8_t         data[IPC_MSG_MAX_DATA_SIZE];
-} __attribute__ ((packed)) msgCentral_t;
+} __attribute__ ((packed)) pkgDataCentral_t;
 
 
 typedef union
 {
-    msgPeripheral_t peripheral_msg_data;
-    msgCentral_t    central_msg_data;
-} packageMsgData_t;
+    pkgDataPeriphery_t  peripheral_msg_data;
+    pkgDataCentral_t    central_msg_data;
+} pkgData_t;
 
 typedef struct
 {
 //    uint16_t tid;
-    packageType_t       package_type;
-} __attribute__ ((packed)) packageHeader_t;
+    pkgType_t       package_type;
+} __attribute__ ((packed)) pkgHeader_t;
 
 typedef struct
 {
-    packageHeader_t     header;
-    packageMsgData_t    data;
-} __attribute__ ((packed)) serialProtoMsg_t;
+    pkgHeader_t     header;
+    pkgData_t       data;
+} __attribute__ ((packed)) serialProtoPkg_t;
 
 
 /*********************************************************************
@@ -127,11 +131,12 @@ void process_ipc_msg(const uint8_t *data, const uint16_t len);
 
 bool send_ipc_msg(uint8_t *data, uint16_t len);
 
-bool send_central_ipc_msg_resp(cmdCentral_t cmd,
+bool send_central_ipc_msg_resp(msgCentral_t msg,
                                uint16_t len,
                                uint8_t *data);
 
-bool send_peripheral_ipc_msg(packageType_t type,
+bool send_peripheral_ipc_msg(msgPeriphery_t msg,
+                             pkgType_t type,
                              uint16_t conn_mask,
                              uint8_t uuid[UUID_DATA_LEN],
                              uint16_t len,

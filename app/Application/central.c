@@ -196,7 +196,8 @@ static bool SimpleCentral_findSvcUuid(uint16_t uuid, uint8_t *pData,
 static status_t Central_CancelRssi(uint16_t connHandle);
 static char* SimpleCentral_getConnAddrStr(uint16_t connHandle);
 static uint8_t Central_removeConnInfo(uint16_t connHandle);
-static void Central_processHubReq(msgCentral_t *ipcMsg);
+static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg);
+static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg);
 static bool connectScannedDevice(uint8_t index);
 /*********************************************************************
  * LOCAL VARIABLES
@@ -513,13 +514,15 @@ static void Central_processAppMsg(appEvt_t *pMsg)
 
     switch (pMsg->hdr.event)
     {
-    /* Parse any IPC message to application event */
+    // Parse incoming IPC message to request central functionality
     case EVT_IPC_CENTRAL_CMD:
-        Central_processHubReq((msgCentral_t *) pMsg->pData);
+        Central_processIpcHubReq((pkgDataCentral_t *) pMsg->pData);
         ICall_free(pMsg->pData);
         break;
 
-    case EVT_IPC_PERIPHERAL_REQ:
+    // Route request for peripheral device
+    case EVT_IPC_MSG_PERIPHERAL:
+        Central_processIpcPeripheryReq((pkgDataPeriphery_t *) pMsg->pData);
         /* route here peripheral request to device's GATT */
         break;
 
@@ -531,7 +534,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
                         pAdvRpt->pData, pAdvRpt->dataLen))
         {
             Central_addScanInfo(pAdvRpt->addr, pAdvRpt->addrType);
-            send_central_ipc_msg_resp(CENTRAL_CMD_DISCOVER_DEVICES,
+            send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICES,
                                       B_ADDR_LEN,
                                       pAdvRpt->addr);
 
@@ -963,8 +966,8 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
                 uint16_t uuid = BUILD_UINT16(p[len - 2], p[len - 1]);
 
                 // If UUID is of interest, store handle
-                Log_info2("%s: UuidDiscovery - found characteristic: 0x%x", (uintptr_t)__func__,
-                          uuid);
+                Log_info2("%s: UuidDiscovery - found characteristic: 0x%x",
+                          (uintptr_t )__func__, uuid);
 
                 ipcBuff[i] = uuid;
             }
@@ -973,7 +976,7 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
         discState = BLE_DISC_STATE_IDLE;
 
         // Send IPC report to the back
-        send_central_ipc_msg_resp(CENTRAL_CMD_DISCOVER_DEVICE_UUIDS,
+        send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
                                   uuidFound * ATT_BT_UUID_SIZE,
                                   (uint8_t *)&ipcBuff);
     }
@@ -1384,7 +1387,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Central_exchangeMtuSize(connHandle);
 
 #if 0
-        send_central_ipc_msg_resp(CENTRAL_CMD_CONNECT_DEVICE,
+        send_central_ipc_msg_resp(CENTRAL_CONNECT_DEVICE,
                                   sizeof(connHandle),
                                   (uint8_t *)&connHandle);
 #endif
@@ -1412,7 +1415,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Log_info1("%s is disconnected", (uintptr_t)pStrAddr);
         Log_info1("Num Conns: %d", numConn);
 
-        send_central_ipc_msg_resp(CENTRAL_CMD_DISCONNECT_DEVICE,
+        send_central_ipc_msg_resp(CENTRAL_MSG_DISCONNECT_DEVICE,
                                           sizeof(connHandle),
                                           (uint8_t *)&connHandle);
 
@@ -1823,30 +1826,26 @@ bool Central_GattRead(uint8_t index)
 }
 
 
-//CENTRAL_CMD_DISCONNECT_DEVICE,
-//CENTRAL_CMD_DISCOVER_SERVICES,
-//CENTRAL_CMD_RESET_REGISTRATION
-
-static void Central_processHubReq(msgCentral_t *ipcMsg)
+static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg)
 {
     bStatus_t cmdResult;
     uint16_t connHandle;
 
-    switch (ipcMsg->cmd)
+    switch (ipcMsg->msg)
     {
-    case CENTRAL_CMD_DISCOVER_DEVICES:
+    case CENTRAL_MSG_DISCOVER_DEVICES:
         GapScan_enable(0, DEFAULT_SCAN_DURATION, DEFAULT_MAX_SCAN_RES);
         break;
 
-    case CENTRAL_CMD_STOP_DEVICES_DISCOVER:
+    case CENTRAL_MSG_STOP_DEVICES_DISCOVER:
         GapScan_disable();
         break;
 
-    case CENTRAL_CMD_CONNECT_DEVICE:
+    case CENTRAL_MSG_CONNECT_DEVICE:
         connectDevice(((cmdReqDataConnectDevice_t*)ipcMsg->data)->addr);
         break;
 
-    case CENTRAL_CMD_DISCONNECT_DEVICE:
+    case CENTRAL_MSG_DISCONNECT_DEVICE:
         connHandle = ((cmdDataDisconnectDevice_t *)ipcMsg->data)->conn_handle;
         cmdResult = GAP_TerminateLinkReq(connHandle,
                                          HCI_DISCONNECT_REMOTE_USER_TERM);
@@ -1855,22 +1854,23 @@ static void Central_processHubReq(msgCentral_t *ipcMsg)
 
         break;
 
-#if 0
-    case CENTRAL_CMD_DISCOVER_SERVICES:
-        // TODO: handle it later
-//        connHandle = connList[0].connHandle;
-//        Util_enqueueAppMsg(EVT_SVC_DISC, SUCCESS, NULL);
+    default:
+        break;
+    }
+}
+
+static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
+{
+//    bStatus_t cmdResult;
+//    uint16_t connHandle;
+
+    switch (ipcMsg->msg)
+    {
+    case PERIPHERY_MSG_READ:
         break;
 
-    case CENTRAL_CMD_DISCOVER_DEVICE_UUIDS:
-//        GATT_DiscAllChars(connHandle, startHandle, endHandle, taskId);
-        GATT_DiscAllChars(0, 0, 65000, selfEntity);
+    case PERIPHERY_MSG_WRITE:
         break;
-
-    case CENTRAL_MSG_GATT_READ:
-        (void)Central_GattRead(0);
-        break;
-#endif
 
     default:
         break;

@@ -26,7 +26,6 @@
 /*********************************************************************
  * CONSTANTS
  */
-#define IPC_MAX_MSG_SIZE            (sizeof(serialProtoMsg_t))
 
 #define TX_BUFFER_LEN               (2 * IPC_MAX_MSG_SIZE + 1)
 
@@ -38,68 +37,73 @@
 *  LOCAL VARIABLES
 */
 // buffer for transmitting into IPC channel
-static serialProtoMsg_t txMessage;
+static serialProtoPkg_t txMessage;
 
 /*********************************************************************
  * FUNCTIONS
  */
 void process_ipc_msg(const uint8_t *data, const uint16_t len)
 {
-    serialProtoMsg_t *pSerialProtoMsg;
-//    char (*__kaboom)[sizeof(serialProtoMsg_t)] = 1;
+//    char (*__kaboom)[sizeof(serialProtoPkg_t)] = 1;
 
-    if ((data != NULL) && (len >= sizeof(packageHeader_t)))
+    serialProtoPkg_t *pSerialProtoPkg;
+    uint8_t packageType;
+
+    if ((data == NULL) || (len < sizeof(pkgHeader_t)))
     {
-        pSerialProtoMsg = (serialProtoMsg_t *)data;
+        return;
+    }
 
-        /* Message is sent for central device */
-        if (pSerialProtoMsg->header.package_type == PACKAGE_CENTRAL_CMD)
+    // Select data from raw IPC package
+    pSerialProtoPkg = (serialProtoPkg_t *) data;
+
+    // Parse package type
+    packageType = pSerialProtoPkg->header.package_type;
+
+    /* Message is sent for central device */
+    if (packageType == PKG_CENTRAL_REQ)
+    {
+        if (len >= (sizeof(pkgHeader_t) + sizeof(pkgDataCentral_t)))
         {
-            if (len >= (sizeof(packageHeader_t) + sizeof(msgCentral_t)))
-            {
-                msgCentral_t *pData = ICall_malloc(sizeof(msgCentral_t));
+            pkgDataCentral_t *pData = ICall_malloc(sizeof(pkgDataCentral_t));
 
-                memcpy((uint8_t *) pData,
-                       (uint8_t *) &pSerialProtoMsg->data.central_msg_data,
-                       sizeof(msgCentral_t));
+            memcpy((uint8_t *) pData,
+                   (uint8_t *) &pSerialProtoPkg->data.central_msg_data,
+                   sizeof(pkgDataCentral_t));
 
-                if (Util_enqueueAppMsg(EVT_IPC_CENTRAL_CMD, SUCCESS,
-                                       (uint8_t *) pData) != SUCCESS)
-                {
-                    ICall_free(pData);
-                }
-            }
-            else
+            if (Util_enqueueAppMsg(EVT_IPC_CENTRAL_CMD, SUCCESS,
+                                   (uint8_t *) pData) != SUCCESS)
             {
-                /* Data length is not matching header definitions */
+                ICall_free(pData);
             }
         }
-        /* Message is sent for peripheral device */
-        else if (pSerialProtoMsg->header.package_type < PACKAGE_TYPE_COUNT)
+        else
         {
-            if (len >= (sizeof(packageHeader_t) + sizeof(msgPeripheral_t)))
-            {
-                msgPeripheral_t *pData = ICall_malloc(sizeof(msgPeripheral_t));
-
-                memcpy((uint8_t *) pData,
-                       (uint8_t *) &pSerialProtoMsg->data.peripheral_msg_data,
-                       sizeof(msgPeripheral_t));
-
-                if (Util_enqueueAppMsg(EVT_IPC_PERIPHERAL_REQ, SUCCESS,
-                                       (uint8_t *) pData) != SUCCESS)
-                {
-                    ICall_free(pData);
-                }
-            }
-            else
-            {
-                /* Data length is not matching header definitions */
-            }
+            /* Data length is not matching header definitions */
         }
     }
-    else
+    /* Message is sent for peripheral device */
+    else if (packageType == PKG_PERIPHERY_REQ)
     {
-        /* incorrect IPC package header provided */
+        if (len >= (sizeof(pkgHeader_t) + sizeof(pkgDataPeriphery_t)))
+        {
+            pkgDataPeriphery_t *pData = ICall_malloc(
+                    sizeof(pkgDataPeriphery_t));
+
+            memcpy((uint8_t *) pData,
+                   (uint8_t *) &pSerialProtoPkg->data.peripheral_msg_data,
+                   sizeof(pkgDataPeriphery_t));
+
+            if (Util_enqueueAppMsg(EVT_IPC_MSG_PERIPHERAL, SUCCESS,
+                                   (uint8_t *) pData) != SUCCESS)
+            {
+                ICall_free(pData);
+            }
+        }
+        else
+        {
+            /* Data length is not matching header definitions */
+        }
     }
 }
 
@@ -128,7 +132,7 @@ bool send_ipc_msg(uint8_t *data, uint16_t len)
     return TRUE;
 }
 
-bool send_central_ipc_msg_resp(cmdCentral_t cmd,
+bool send_central_ipc_msg_resp(msgCentral_t msg,
                                uint16_t len,
                                uint8_t *data)
 {
@@ -136,8 +140,8 @@ bool send_central_ipc_msg_resp(cmdCentral_t cmd,
 
     memset(&txMessage, 0, IPC_MAX_MSG_SIZE);
 
-    txMessage.header.package_type = PACKAGE_CENTRAL_RESP;
-    txMessage.data.central_msg_data.cmd = cmd;
+    txMessage.header.package_type = PKG_CENTRAL_RESP;
+    txMessage.data.central_msg_data.msg = msg;
     txMessage.data.central_msg_data.len = len;
     memcpy(txMessage.data.central_msg_data.data, data, len);
 
@@ -147,7 +151,8 @@ bool send_central_ipc_msg_resp(cmdCentral_t cmd,
 }
 
 
-bool send_peripheral_ipc_msg(packageType_t type,
+bool send_peripheral_ipc_msg(msgPeriphery_t msg,
+                             pkgType_t type,
                              uint16_t conn_mask,
                              uint8_t uuid[UUID_DATA_LEN],
                              uint16_t len,
@@ -158,6 +163,7 @@ bool send_peripheral_ipc_msg(packageType_t type,
     memset(&txMessage, 0, IPC_MAX_MSG_SIZE);
 
     txMessage.header.package_type = type;
+    txMessage.data.peripheral_msg_data.msg = msg;
     txMessage.data.peripheral_msg_data.conn_mask = conn_mask;
     txMessage.data.peripheral_msg_data.len = len;
     memcpy(txMessage.data.peripheral_msg_data.data, data, len);
