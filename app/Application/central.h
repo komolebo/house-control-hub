@@ -29,6 +29,7 @@
 // This cannot exceed 27 (two-button menu's constraint)
 #define DEFAULT_MAX_SCAN_RES                 8
 
+#define UUID_LIMIT_NUM_PER_DEVICE       (16)
 
 /*********************************************************************
  * MACROS
@@ -41,6 +42,7 @@
 typedef enum
 {
     EVT_IPC_CENTRAL_CMD     = 0,
+    EVT_IPC_CENTRAL_RESP,
     EVT_IPC_PERIPHERAL_REQ,
     EVT_SCAN_DISABLE,
     EVT_SCAN_ENABLED,

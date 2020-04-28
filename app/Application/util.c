@@ -410,6 +410,51 @@ char *Util_convertBdAddr2Str(uint8_t *pAddr)
     return str;
 }
 
+
+/*********************************************************************
+ * @fn      Util_convertHex2Str
+ *
+ * @brief   Convert hex to string. Only needed when hex displayed.
+ *          Function is not safe if wrong length provided!
+ *
+ *
+ * @param   pAddr - hex array address
+ *
+ *          pStr - string array address
+ *
+ *          len - length of data to convert and it's not checked for address
+ *
+ * @return  BD address as a string
+ */
+bool Util_convertHex2Str(const uint8_t *hex_arr, uint8_t *str_arr, uint16_t hex_len,
+                         uint16_t str_len)
+{
+    static char hex_codes[] = "0123456789ABCDEF";
+
+    uint8_t hexCnt;
+    uint8_t *pHex = hex_arr;
+    uint8_t *pStr = str_arr;
+
+    /* 2 char symbols needed to encode 1 byte hex value,
+     * one more symbols is for terminal NULL
+     * */
+    if (2 * hex_len + 1 > str_len)
+    {
+        Log_error("%s: not enough string space to place hex array", __func__);
+        return FALSE;
+    }
+
+    for (hexCnt = 0; hexCnt < hex_len; hexCnt++)
+    {
+        *pStr++ = hex_codes[*pHex >> 4];
+        *pStr++ = hex_codes[*pHex & 0x0F];
+        pHex++;
+    }
+    *pStr = NULL;
+
+    return TRUE;
+}
+
 /*********************************************************************
  * @fn      Util_isBufSet
  *

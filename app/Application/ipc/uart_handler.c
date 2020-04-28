@@ -111,7 +111,7 @@ static void UartHandler_Task()
         if (uart_status != UART_STATUS_ERROR)
         {
             /* Decode and send here an event to application */
-            process_rx_ipc_msg(rxBuffer, IPC_MSG_SIZE);
+            process_ipc_msg(rxBuffer, IPC_MSG_SIZE);
         }
 
         /* clear whole buffer */

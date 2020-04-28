@@ -118,7 +118,7 @@ enum
   BLE_DISC_STATE_IDLE,                // Idle
   BLE_DISC_STATE_MTU,                 // Exchange ATT MTU size
   BLE_DISC_STATE_SVC,                 // Service discovery
-  BLE_DISC_STATE_CHAR                 // Characteristic discovery
+  BLE_DISC_STATE_UUID                 // UUIDs discovery
 };
 
 
@@ -190,7 +190,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg);
 static void Central_processPairState(uint8_t state,
                                      scPairStateData_t* pPairData);
 static void Central_processPasscode(scPasscodeData_t *pData);
-static void Central_startSvcDiscovery(void);
+static void Central_exchangeMtuSize();
 static bool SimpleCentral_findSvcUuid(uint16_t uuid, uint8_t *pData,
                                       uint16_t dataLen);
 static status_t Central_CancelRssi(uint16_t connHandle);
@@ -205,6 +205,33 @@ static bool connectScannedDevice(uint8_t index);
 // GAP GATT Attributes
 static const uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "Central";
 
+
+#if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
+// Number of scan results filtered by Service UUID
+static uint8_t numScanRes = 0;
+
+// Scan results filtered by Service UUID
+static scanRec_t scanList[DEFAULT_MAX_SCAN_RES];
+#endif // DEFAULT_DEV_DISC_BY_SVC_UUID
+
+// Discovery state
+static uint8_t discState = BLE_DISC_STATE_IDLE;
+static uint8_t discConnHandle;
+
+// Discovered service start and end handle
+static uint16_t discSvcStartHdl = 0;
+static uint16_t discSvcEndHdl = 0;
+
+// List of connections
+static connRec_t connList[MAX_NUM_BLE_CONNS];
+
+// Number of connected devices
+static uint8_t numConn = 0;
+
+// Connection handle of current connection
+#if 0
+static uint16_t connHandle = CONNHANDLE_INVALID;
+#endif
 // Entity ID globally used to check for source and/or destination of messages
 
 // Event globally used to post local events and pend on system and
@@ -230,11 +257,6 @@ static uint8 rpa[B_ADDR_LEN] = {0};
 // Clock instance for RPA read events.
 static Clock_Struct clkRpaRead;
 
-// Connection handle of current connection
-static uint16_t connHandle = CONNHANDLE_INVALID;
-
-// Number of connected devices
-static uint8_t numConn = 0;
 
 // Value to write
 static uint8_t charVal = 0;
@@ -246,27 +268,11 @@ static gapBondCBs_t bondMgrCBs =
     Central_pairStateCb // Pairing/Bonding state Callback
 };
 
-// List of connections
-static connRec_t connList[MAX_NUM_BLE_CONNS];
 
-// Discovery state
-static uint8_t discState = BLE_DISC_STATE_IDLE;
 
-// Discovered service start and end handle
-static uint16_t svcStartHdl = 0;
-static uint16_t svcEndHdl = 0;
-
-#if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
-// Number of scan results filtered by Service UUID
-static uint8_t numScanRes = 0;
-
-// Scan results filtered by Service UUID
-static scanRec_t scanList[DEFAULT_MAX_SCAN_RES];
-#endif // DEFAULT_DEV_DISC_BY_SVC_UUID
 
 // Accept or reject L2CAP connection parameter update request
 static bool acceptParamUpdateReq = true;
-
 
 
 /*********************************************************************
@@ -510,6 +516,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
     /* Parse any IPC message to application event */
     case EVT_IPC_CENTRAL_CMD:
         Central_processHubReq((msgCentral_t *) pMsg->pData);
+        ICall_free(pMsg->pData);
         break;
 
     case EVT_IPC_PERIPHERAL_REQ:
@@ -524,9 +531,14 @@ static void Central_processAppMsg(appEvt_t *pMsg)
                         pAdvRpt->pData, pAdvRpt->dataLen))
         {
             Central_addScanInfo(pAdvRpt->addr, pAdvRpt->addrType);
+            send_central_ipc_msg_resp(CENTRAL_CMD_DISCOVER_DEVICES,
+                                      B_ADDR_LEN,
+                                      pAdvRpt->addr);
+
             Log_info1("Discovered: %s",
                       (uintptr_t)Util_convertBdAddr2Str(pAdvRpt->addr));
-            connectScannedDevice(0);
+
+//            connectScannedDevice(0);
         }
 
         // Free report payload data
@@ -629,8 +641,8 @@ static void Central_processAppMsg(appEvt_t *pMsg)
     }
 
     case EVT_SVC_DISC:
-        Log_info0("Start service discovery");
-        Central_startSvcDiscovery();
+//        Log_info0("Start service discovery");
+//        Central_exchangeMtuSize();
         break;
 
     case EVT_READ_RSSI:
@@ -891,89 +903,79 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
  */
 static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
 {
-    Log_info2("Gatt event received, discState: %d, pMsg->method: 0x%x ",
-              discState, pMsg->method);
-
     if (discState == BLE_DISC_STATE_MTU)
     {
-        // MTU size response received, discover simple service
+        // MTU size response received, discover services
         if (pMsg->method == ATT_EXCHANGE_MTU_RSP)
         {
-            uint8_t uuid[ATT_BT_UUID_SIZE] =
-                    {
-//                      LO_UINT16(CONFIG_SERVICE_SERV_UUID), HI_UINT16(
-//                              CONFIG_SERVICE_SERV_UUID)
-                         LO_UINT16(0xFFF0), HI_UINT16(0xFFF0)
-                    };
-
             discState = BLE_DISC_STATE_SVC;
 
-            // Discovery simple service
-            VOID GATT_DiscPrimaryServiceByUUID(pMsg->connHandle, uuid,
-                                               ATT_BT_UUID_SIZE, selfEntity);
+            /* discover all device's services */
+            GATT_DiscAllPrimaryServices(discConnHandle, selfEntity);
         }
     }
     else if (discState == BLE_DISC_STATE_SVC)
     {
         // Service found, store handles
-        if (pMsg->method == ATT_FIND_BY_TYPE_VALUE_RSP
+        //if (pMsg->method == ATT_FIND_BY_TYPE_VALUE_RSP &&
+        if (pMsg->method == ATT_READ_BY_GRP_TYPE_RSP
                 && pMsg->msg.findByTypeValueRsp.numInfo > 0)
         {
-            svcStartHdl = ATT_ATTR_HANDLE(
+            discSvcStartHdl = ATT_ATTR_HANDLE(
                     pMsg->msg.findByTypeValueRsp.pHandlesInfo, 0);
-            svcEndHdl = ATT_GRP_END_HANDLE(
+            discSvcEndHdl = ATT_GRP_END_HANDLE(
                     pMsg->msg.findByTypeValueRsp.pHandlesInfo, 0);
+
+            Log_info2("%s: ServiceDiscovery - groups found: %d", (uintptr_t)__func__,
+                      ((attReadByGrpTypeRsp_t *)&pMsg->msg)->numGrps);
         }
 
         // If procedure complete
-        if (((pMsg->method == ATT_FIND_BY_TYPE_VALUE_RSP)
+        if (((pMsg->method == ATT_READ_BY_GRP_TYPE_RSP)
                 && (pMsg->hdr.status == bleProcedureComplete))
                 || (pMsg->method == ATT_ERROR_RSP))
         {
-            if (svcStartHdl != 0)
+            if (discSvcStartHdl != 0)
             {
-                attReadByTypeReq_t req;
-
-                // Discover characteristic
-                discState = BLE_DISC_STATE_CHAR;
-
-                req.startHandle = svcStartHdl;
-                req.endHandle = svcEndHdl;
-                req.type.len = ATT_BT_UUID_SIZE;
-                req.type.uuid[0] = LO_UINT16(CS_STATE_UUID);
-                req.type.uuid[1] = HI_UINT16(CS_STATE_UUID);
-
-                VOID GATT_DiscCharsByUUID(pMsg->connHandle, &req, selfEntity);
+                discState = BLE_DISC_STATE_UUID;
+                GATT_DiscAllChars(discConnHandle, discSvcStartHdl, discSvcEndHdl,
+                                  selfEntity);
             }
         }
     }
-    else if (discState == BLE_DISC_STATE_CHAR)
+    else if (discState == BLE_DISC_STATE_UUID)
     {
-        // Characteristic found, store handle
-        if ((pMsg->method == ATT_READ_BY_TYPE_RSP)
-                && (pMsg->msg.readByTypeRsp.numPairs > 0))
+        uint16_t ipcBuff[UUID_LIMIT_NUM_PER_DEVICE];
+        uint16 uuidFound;
+
+        uuidFound = pMsg->msg.readByTypeRsp.numPairs;
+
+        // Characteristic descriptors found
+        if (pMsg->method == ATT_READ_BY_TYPE_RSP && uuidFound > 0)
         {
-            uint8_t connIndex = Central_getConnIndex(connHandle);
+            uint8_t len = pMsg->msg.readByTypeRsp.len;
 
-            // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
-            CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
+            // For each characteristic declaration
+            for (uint8_t i = 0, *p = pMsg->msg.readByTypeRsp.pDataList; i < uuidFound;
+                    i++, p += len)
+            {
+                // Parse characteristic declaration, UUID is last 2 bytes of an element
+                uint16_t uuid = BUILD_UINT16(p[len - 2], p[len - 1]);
 
-            // Store the handle of the simpleprofile characteristic 1 value
-            connList[connIndex].charHandle = BUILD_UINT16(
-                    pMsg->msg.readByTypeRsp.pDataList[3],
-                    pMsg->msg.readByTypeRsp.pDataList[4]);
+                // If UUID is of interest, store handle
+                Log_info2("%s: UuidDiscovery - found characteristic: 0x%x", (uintptr_t)__func__,
+                          uuid);
 
-            Log_info0("Simple Svc Found");
-
-#if 0
-            // Now we can use GATT Read/Write
-            tbm_setItemStatus(&scMenuPerConn,
-                              SC_ITEM_GATTREAD | SC_ITEM_GATTWRITE,
-                              SC_ITEM_NONE);
-#endif
+                ipcBuff[i] = uuid;
+            }
         }
-
+        // Discovery done
         discState = BLE_DISC_STATE_IDLE;
+
+        // Send IPC report to the back
+        send_central_ipc_msg_resp(CENTRAL_CMD_DISCOVER_DEVICE_UUIDS,
+                                  uuidFound * ATT_BT_UUID_SIZE,
+                                  (uint8_t *)&ipcBuff);
     }
 }
 
@@ -1377,36 +1379,15 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Log_info1("Connected to %s", (uintptr_t)pStrAddr);
         Log_info1("Num Conns: %d", numConn);
 
+        // Request MTU to be ready for next discovery request
+        discConnHandle = connHandle;
+        Central_exchangeMtuSize(connHandle);
+
 #if 0
-        // Disable "Connect To" until another discovery is performed
-        itemsToDisable |= SC_ITEM_CONNECT;
-
-        // If we already have maximum allowed number of connections,
-        // disable device discovery and additional connection making.
-        if (numConn >= MAX_NUM_BLE_CONNS)
-        {
-            itemsToDisable |= SC_ITEM_SCANPHY | SC_ITEM_STARTDISC;
-        }
-
-        for (i = 0; i < TBM_GET_NUM_ITEM(&scMenuConnect); i++)
-        {
-            if (!memcmp(TBM_GET_ACTION_DESC(&scMenuConnect, i), pStrAddr,
-                        SC_ADDR_STR_SIZE))
-            {
-                // Disable this device from the connection choices
-                tbm_setItemStatus(&scMenuConnect, SC_ITEM_NONE, 1 << i);
-            }
-            else if (TBM_IS_ITEM_ACTIVE(&scMenuConnect, i))
-            {
-                numConnectable++;
-            }
-        }
-
-        // Enable/disable Main menu items properly
-        tbm_setItemStatus(&scMenuMain, SC_ITEM_ALL & ~(itemsToDisable),
-                          itemsToDisable);
+        send_central_ipc_msg_resp(CENTRAL_CMD_CONNECT_DEVICE,
+                                  sizeof(connHandle),
+                                  (uint8_t *)&connHandle);
 #endif
-
         break;
     }
 
@@ -1430,6 +1411,11 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
 
         Log_info1("%s is disconnected", (uintptr_t)pStrAddr);
         Log_info1("Num Conns: %d", numConn);
+
+        send_central_ipc_msg_resp(CENTRAL_CMD_DISCONNECT_DEVICE,
+                                          sizeof(connHandle),
+                                          (uint8_t *)&connHandle);
+
 #if 0
         for (i = 0; i < TBM_GET_NUM_ITEM(&scMenuConnect); i++)
         {
@@ -1543,19 +1529,18 @@ static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg)
 }
 
 /*********************************************************************
- * @fn      Central_startSvcDiscovery
+ * @fn      Central_exchangeMtuSize
  *
  * @brief   Start service discovery.
  *
  * @return  none
  */
-static void Central_startSvcDiscovery(void)
+static void Central_exchangeMtuSize()
 {
-    Log_info0("Starting discovery");
     attExchangeMTUReq_t req;
 
     // Initialize cached handles
-    svcStartHdl = svcEndHdl = 0;
+    discSvcStartHdl = discSvcEndHdl = 0;
 
     discState = BLE_DISC_STATE_MTU;
 
@@ -1564,8 +1549,9 @@ static void Central_startSvcDiscovery(void)
 
     // ATT MTU size should be set to the minimum of the Client Rx MTU
     // and Server Rx MTU values
-//    VOID GATT_ExchangeMTU(connHandle, &req, selfEntity);
-    VOID GATT_ExchangeMTU(connList[0].connHandle, &req, selfEntity);
+    VOID GATT_ExchangeMTU(discConnHandle, &req, selfEntity);
+
+    Log_info1("Exchanging MTU with 0x%x", discConnHandle);
 }
 
 /*********************************************************************
@@ -1774,6 +1760,25 @@ static uint8_t Central_removeConnInfo(uint16_t connHandle)
 }
 
 /*********************************************************************
+ * @fn      connectDevice
+ *
+ * @brief   Establish a link to a peer device
+ *
+ * @param   pAddr - 6 byte array of device address
+ *
+ * @return  always true
+ */
+static bool connectDevice(uint8_t *pAddr)
+{
+    GapInit_connect(PEER_ADDRTYPE_PUBLIC_OR_PUBLIC_ID, // TODO:  & MASK_ADDRTYPE_ID
+            pAddr, DEFAULT_INIT_PHY, 0);
+
+    Log_info1("Connecting to %s", (uintptr_t )Util_convertBdAddr2Str(pAddr));
+
+    return (true);
+}
+
+/*********************************************************************
  * @fn      connectScannedDevice
  *
  * @brief   Establish a link to a peer device
@@ -1817,32 +1822,55 @@ bool Central_GattRead(uint8_t index)
     return (true);
 }
 
+
+//CENTRAL_CMD_DISCONNECT_DEVICE,
+//CENTRAL_CMD_DISCOVER_SERVICES,
+//CENTRAL_CMD_RESET_REGISTRATION
+
 static void Central_processHubReq(msgCentral_t *ipcMsg)
 {
+    bStatus_t cmdResult;
+    uint16_t connHandle;
+
     switch (ipcMsg->cmd)
     {
-    case CENTRAL_MSG_DISCOVER:
+    case CENTRAL_CMD_DISCOVER_DEVICES:
         GapScan_enable(0, DEFAULT_SCAN_DURATION, DEFAULT_MAX_SCAN_RES);
         break;
 
-    case CENTRAL_MSG_STOP_DISCOVERING:
+    case CENTRAL_CMD_STOP_DEVICES_DISCOVER:
         GapScan_disable();
         break;
 
-    case CENTRAL_MSG_CONNECT_DEVICE:
-        connectScannedDevice(0);
+    case CENTRAL_CMD_CONNECT_DEVICE:
+        connectDevice(((cmdReqDataConnectDevice_t*)ipcMsg->data)->addr);
         break;
 
-    case CENTRAL_MSG_DISCOVER_SERVICES:
-//        connHandle = connList[0].connHandle;
-        Util_enqueueAppMsg(EVT_SVC_DISC, SUCCESS, NULL);
+    case CENTRAL_CMD_DISCONNECT_DEVICE:
+        connHandle = ((cmdDataDisconnectDevice_t *)ipcMsg->data)->conn_handle;
+        cmdResult = GAP_TerminateLinkReq(connHandle,
+                                         HCI_DISCONNECT_REMOTE_USER_TERM);
 
+        Log_info1("Disconnect device request result: %d", cmdResult);
+
+        break;
+
+#if 0
+    case CENTRAL_CMD_DISCOVER_SERVICES:
+        // TODO: handle it later
+//        connHandle = connList[0].connHandle;
+//        Util_enqueueAppMsg(EVT_SVC_DISC, SUCCESS, NULL);
+        break;
+
+    case CENTRAL_CMD_DISCOVER_DEVICE_UUIDS:
+//        GATT_DiscAllChars(connHandle, startHandle, endHandle, taskId);
+        GATT_DiscAllChars(0, 0, 65000, selfEntity);
         break;
 
     case CENTRAL_MSG_GATT_READ:
         (void)Central_GattRead(0);
         break;
-
+#endif
 
     default:
         break;

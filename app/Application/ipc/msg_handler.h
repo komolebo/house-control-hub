@@ -24,8 +24,7 @@
 /*********************************************************************
  * CONSTANTS
  */
-#define IPC_MSG_MAX_DATA_SIZE       (48)
-
+#define IPC_MSG_MAX_DATA_SIZE       (62)
 
 /*********************************************************************
  * TYPEDEFS
@@ -33,27 +32,52 @@
 
 typedef enum
 {
-    PACKAGE_CMD,
-    PACKAGE_READ_REQ,
-    PACKAGE_WRITE_REQ,
-    PACKAGE_READ_RESP,
-    PACKAGE_WRITE_RESP,
-//    PACKAGE_ACKNOWLEDGE,
-    PACKAGE_NOTIFICATION,
-    PACKAGE_INDICATION,
+    PACKAGE_CENTRAL_CMD,
+    PACKAGE_CENTRAL_RESP,
+    PACKAGE_PERIPHERY_READ_REQ,
+    PACKAGE_PERIPHERY_WRITE_REQ,
+    PACKAGE_PERIPHERY_READ_RESP,
+    PACKAGE_PERIPHERY_WRITE_RESP,
+    PACKAGE_PERIPHERAL_NOTIFICATION,
+    PACKAGE_PERIPHERAL_INDICATION,
     PACKAGE_TYPE_COUNT
 } packageType_t;
 
 typedef enum
 {
-    CENTRAL_MSG_DISCOVER,
-    CENTRAL_MSG_STOP_DISCOVERING,
-    CENTRAL_MSG_CONNECT_DEVICE,
-    CENTRAL_MSG_DISCOVER_SERVICES,
-    CENTRAL_MSG_GATT_READ,
-    CENTRAL_MSG_RESET_REGISTRATION
+    CENTRAL_CMD_DISCOVER_DEVICES,
+    CENTRAL_CMD_STOP_DEVICES_DISCOVER,
+    CENTRAL_CMD_CONNECT_DEVICE,
+    CENTRAL_CMD_DISCONNECT_DEVICE,
+//    CENTRAL_CMD_DISCOVER_SERVICES_AND_UUIDS,
+    CENTRAL_CMD_DISCOVER_DEVICE_UUIDS,
+    CENTRAL_CMD_RESET_REGISTRATION
 }  cmdCentral_t;
 
+
+typedef struct
+{
+    uint8_t addr[B_ADDR_LEN];
+} cmdReqDataConnectDevice_t;
+typedef struct
+{
+    uint16_t conn_handle;
+    uint8_t addr[B_ADDR_LEN];
+    uint8_t *uuids[UUID_DATA_LEN];
+} cmdRspDataConnectDevice_t;
+
+typedef struct
+{
+    uint16_t conn_handle;
+//    uint8_t addr[B_ADDR_LEN];
+    uint16_t len;
+    uint8_t *uuids[UUID_DATA_LEN];
+} cmdRspDataDiscoverUuids_t;
+
+typedef struct
+{
+    uint16_t conn_handle;
+} cmdDataDisconnectDevice_t;
 
 typedef struct
 {
@@ -61,7 +85,7 @@ typedef struct
     uint8_t         uuid[UUID_DATA_LEN];
     uint16_t        len;
     uint8_t         data[IPC_MSG_MAX_DATA_SIZE];
-} msgPeripheral_t;
+} __attribute__ ((packed)) msgPeripheral_t;
 
 
 typedef struct
@@ -69,7 +93,7 @@ typedef struct
     cmdCentral_t    cmd;
     uint16_t        len;
     uint8_t         data[IPC_MSG_MAX_DATA_SIZE];
-} msgCentral_t;
+} __attribute__ ((packed)) msgCentral_t;
 
 
 typedef union
@@ -82,7 +106,7 @@ typedef struct
 {
 //    uint16_t tid;
     packageType_t       package_type;
-} packageHeader_t;
+} __attribute__ ((packed)) packageHeader_t;
 
 typedef struct
 {
@@ -98,7 +122,20 @@ typedef struct
 /*********************************************************************
  * FUNCTIONS
  */
-void process_rx_ipc_msg(uint8_t *data, size_t len);
+void process_ipc_msg(const uint8_t *data, const uint16_t len);
+
+
+bool send_ipc_msg(uint8_t *data, uint16_t len);
+
+bool send_central_ipc_msg_resp(cmdCentral_t cmd,
+                               uint16_t len,
+                               uint8_t *data);
+
+bool send_peripheral_ipc_msg(packageType_t type,
+                             uint16_t conn_mask,
+                             uint8_t uuid[UUID_DATA_LEN],
+                             uint16_t len,
+                             uint8_t *data);
 
 
 #endif /* APPLICATION_UART_ADAPTER_H_ */
