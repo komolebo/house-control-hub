@@ -81,6 +81,34 @@ uint8_t NetInfo_addConnInfo(uint16_t connHandle, uint8_t *pAddr)
 }
 
 /*********************************************************************
+ * @fn      NetInfo_removeConnInfo
+ *
+ * @brief   Remove a device from the connected device list
+ *
+ * @return  index of the connected device list entry where the new connection
+ *          info is removed from.
+ *          if connHandle is not found, MAX_NUM_BLE_CONNS will be returned.
+ */
+uint8_t NetInfo_removeConnInfo(uint16_t connHandle)
+{
+    uint8_t i;
+
+    for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
+    {
+        if (connList[i].connHandle == connHandle)
+        {
+            // Found the entry to mark as deleted
+            connList[i].connHandle = CONNHANDLE_INVALID;
+            numConn--;
+
+            break;
+        }
+    }
+
+    return i;
+}
+
+/*********************************************************************
  * @fn      NetInfo_getConnIndex
  *
  * @brief   Find index in the connected device list by connHandle
@@ -137,7 +165,7 @@ connRec_t * NetInfo_getConnInfo(uint16_t connHandle)
     uint8_t connIndex = NetInfo_getConnIndex(connHandle);
 
     // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
-    if (connIndex < MAX_NUM_BLE_CONNS)
+    if (connIndex >= MAX_NUM_BLE_CONNS)
     {
         return NULL;
     }
@@ -169,30 +197,44 @@ char* NetInfo_getConnAddrStr(uint16_t connHandle)
     return NULL;
 }
 
-/*********************************************************************
- * @fn      NetInfo_removeConnInfo
- *
- * @brief   Remove a device from the connected device list
- *
- * @return  index of the connected device list entry where the new connection
- *          info is removed from.
- *          if connHandle is not found, MAX_NUM_BLE_CONNS will be returned.
- */
-uint8_t NetInfo_removeConnInfo(uint16_t connHandle)
+uint16_t NetInfo_addCharHandle(uint16_t connHandle,
+                               uint8_t charValue[UUID_DATA_LEN],
+                               uint8_t charHandle)
 {
-    uint8_t i;
+    connRec_t* conn = NetInfo_getConnInfo(connHandle);
 
-    for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
+    if (conn)
     {
-        if (connList[i].connHandle == connHandle)
+        for (uint8_t i = 0; i < CHARS_PER_DEVICE; i++)
         {
-            // Found the entry to mark as deleted
-            connList[i].connHandle = CONNHANDLE_INVALID;
-            numConn--;
+            if (conn->charData[i].charHandle == GATT_INVALID_HANDLE)
+            {
+                memcpy(&conn->charData[i].charValue, charValue, UUID_DATA_LEN);
+                conn->charData[i].charHandle = charHandle;
 
-            break;
+                return i;
+            }
         }
     }
 
-    return i;
+    return CONNHANDLE_INVALID;
+}
+
+uint16_t NetInfo_getCharHandle(uint16_t connHandle,
+                               uint8_t charValue[UUID_DATA_LEN])
+{
+    connRec_t* conn = NetInfo_getConnInfo(connHandle);
+
+    if (conn)
+    {
+        for (uint8_t i = 0; i < CHARS_PER_DEVICE; i++)
+        {
+            if (memcmp(conn->charData[i].charValue, charValue, UUID_DATA_LEN) == 0)
+            {
+                return conn->charData[i].charHandle;
+            }
+        }
+    }
+
+    return CONNHANDLE_INVALID;
 }

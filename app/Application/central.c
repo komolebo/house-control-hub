@@ -113,7 +113,7 @@
 #define SC_READ_RPA_PERIOD                    3000
 
 // How often to scan network for devices (in ms)
-#define SCAN_PERIOD                         (3000)
+#define SCAN_PERIOD                             (10000)
 /*********************************************************************
  * TYPEDEFS
  */
@@ -192,6 +192,7 @@ static status_t Central_CancelRssi(uint16_t connHandle);
 static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg);
 static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg);
 static bool connectScannedDevice(uint8_t index);
+static bool connectDevice(uint8_t *pAddr);
 /*********************************************************************
  * LOCAL VARIABLES
  */
@@ -218,9 +219,7 @@ static uint16_t discSvcEndHdl = 0;
 
 // Connection handle of current connection
 static uint16_t uuidRequest = 0;
-#if 0
-static uint16_t connHandle = CONNHANDLE_INVALID;
-#endif
+
 // Entity ID globally used to check for source and/or destination of messages
 
 // Event globally used to post local events and pend on system and
@@ -376,6 +375,9 @@ static void Central_init(void)
     // Initialize GAP layer for Central role and register to receive GAP events
     GAP_DeviceInit(GAP_PROFILE_CENTRAL, selfEntity, addrMode, NULL);
 
+    // Initialize network info for connected devices
+    NetInfo_init();
+
     //  dispHandle = Display_open(Display_Type_ANY, NULL);
     //
     //  // Disable all items in the main menu
@@ -522,6 +524,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
             Log_info1("Discovered: %s",
                       (uintptr_t)Util_convertBdAddr2Str(pAdvRpt->addr));
 
+//            connectDevice(pAdvRpt->addr);
 //            connectScannedDevice(0);
         }
 
@@ -552,74 +555,14 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         numReport = ((GapScan_Evt_End_t*) (pMsg->pData))->numReport;
 #endif // DEFAULT_DEV_DISC_BY_SVC_UUID
 
-        Log_info1("%d devices discovered", numReport);
+        Log_info1("%d device(s) discovered", numReport);
+//        connectDevice(scanList[0].addr);
 
-#if 0
-        if (numReport > 0)
-        {
-            // Also enable "Connect to"
-            itemsToEnable |= SC_ITEM_CONNECT;
-        }
-
-        if (numConn > 0)
-        {
-            // Also enable "Work with"
-            itemsToEnable |= SC_ITEM_SELECTCONN;
-        }
-
-        // Enable "Discover Devices", "Set Scanning PHY", and possibly
-        // "Connect to" and/or "Work with".
-        // Disable "Stop Discovering".
-        tbm_setItemStatus(&scMenuMain, itemsToEnable, SC_ITEM_STOPDISC);
-#endif
         // Allocate buffer to display addresses
         if (pAddrs != NULL)
         {
             // A scan has been done previously, release the previously allocated buffer
             ICall_free(pAddrs);
-        }
-        pAddrs = ICall_malloc(numReport * SC_ADDR_STR_SIZE);
-        if (pAddrs == NULL)
-        {
-            numReport = 0;
-        }
-#if 0
-        TBM_SET_NUM_ITEM(&scMenuConnect, numReport);
-#endif
-        if (pAddrs != NULL)
-        {
-            pAddrTemp = pAddrs;
-            for (i = 0; i < numReport; i++, pAddrTemp += SC_ADDR_STR_SIZE)
-            {
-#if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
-                // Get the address from the list, convert it to string, and
-                // copy the string to the address buffer
-                memcpy(pAddrTemp, Util_convertBdAddr2Str(scanList[i].addr),
-                        SC_ADDR_STR_SIZE);
-#else // !DEFAULT_DEV_DISC_BY_SVC_UUID
-                // Get the address from the report, convert it to string, and
-                // copy the string to the address buffer
-                GapScan_getAdvReport(i, &advRpt);
-                memcpy(pAddrTemp, Util_convertBdAddr2Str(advRpt.addr),
-                       SC_ADDR_STR_SIZE);
-#endif // DEFAULT_DEV_DISC_BY_SVC_UUID
-#if 0
-                // Assign the string to the corresponding action description of the menu
-                TBM_SET_ACTION_DESC(&scMenuConnect, i, pAddrTemp);
-#endif
-            }
-
-#if 0
-            // Disable any non-active scan results
-            for (; i < DEFAULT_MAX_SCAN_RES; i++)
-            {
-                tbm_setItemStatus(&scMenuConnect, TBM_ITEM_NONE, (1 << i));
-            }
-#endif
-            // Note: pAddrs is not freed since it will be used by the two button menu
-            // to display the discovered address.
-            // This implies that at least the last discovered addresses
-            // will be maintained until a new scan is done.
         }
         break;
     }
@@ -951,13 +894,17 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
                     i++, p += len)
             {
                 // Parse characteristic declaration, UUID is last 2 bytes of an element
-                uint16_t uuid = BUILD_UINT16(p[len - 2], p[len - 1]);
+                uint16_t uuid_val = BUILD_UINT16(p[len - 2], p[len - 1]);
+                uint16_t uuid_hdl = BUILD_UINT16(p[len - 4], p[len - 3]);
 
                 // If UUID is of interest, store handle
-                Log_info2("%s: UuidDiscovery - retain characteristic: 0x%x",
-                          (uintptr_t )__func__, uuid);
+                NetInfo_addCharHandle(discConnHandle, (uint8_t *) &uuid_val,
+                                      uuid_hdl);
 
-                ipcRespBuff[i + discUuid] = uuid;
+                Log_info2("%s: UuidDiscovery - retain characteristic: 0x%x",
+                          (uintptr_t )__func__, uuid_val);
+
+                ipcRespBuff[i + discUuid] = uuid_val;
             }
 
             discUuid += uuidFound;
@@ -1028,7 +975,12 @@ static void Central_processGATTPeripheralEvent(gattMsgEvent_t *pMsg)
     }
     else if (pMsg->method == ATT_WRITE_RSP)
     {
+        Log_warning0("ACK write received, GOOD!!");
 
+        send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, PERIPHERY_MSG_WRITE,
+                                pMsg->connHandle, (uint8_t*) &uuidRequest, 0,
+                                NULL);
+        uuidRequest = 0;
     }
 }
 
@@ -1405,13 +1357,13 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
 
     case GAP_LINK_ESTABLISHED_EVENT:
     {
-        uint16_t connHandle = ((gapEstLinkReqEvent_t*) pMsg)->connectionHandle;
+        uint16_t connHdlr = ((gapEstLinkReqEvent_t*) pMsg)->connectionHandle;
         uint8_t* pAddr = ((gapEstLinkReqEvent_t*) pMsg)->devAddr;
         uint8_t connIndex;
         uint8_t* pStrAddr;
 
         // Add this connection info to the list
-        connIndex = NetInfo_addConnInfo(connHandle, pAddr);
+        connIndex = NetInfo_addConnInfo(connHdlr, pAddr);
 
         // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
         CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
@@ -1425,8 +1377,8 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Log_info1("Num Conns: %d", numConn);
 
         // Request MTU to be ready for next discovery request
-        discConnHandle = connHandle;
-        Central_exchangeMtuSize(connHandle);
+        discConnHandle = connHdlr;
+        Central_exchangeMtuSize(connHdlr);
 
 #if 0
         send_central_ipc_msg_resp(CENTRAL_CONNECT_DEVICE,
@@ -1438,16 +1390,16 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
 
     case GAP_LINK_TERMINATED_EVENT:
     {
-        uint16_t connHandle =
+        uint16_t connHdlr =
                 ((gapTerminateLinkEvent_t*) pMsg)->connectionHandle;
         uint8_t connIndex;
         uint8_t* pStrAddr;
 
         // Cancel timers
-        Central_CancelRssi(connHandle);
+        Central_CancelRssi(connHdlr);
 
         // Mark this connection deleted in the connected device list.
-        connIndex = NetInfo_removeConnInfo(connHandle);
+        connIndex = NetInfo_removeConnInfo(connHdlr);
 
         // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
         CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
@@ -1459,8 +1411,8 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Log_info1("Num Conns: %d", numConn);
 
         send_central_ipc_msg_resp(CENTRAL_MSG_DISCONNECT_DEVICE,
-                                          sizeof(connHandle),
-                                          (uint8_t *)&connHandle);
+                                          sizeof(connHdlr),
+                                          (uint8_t *)&connHdlr);
 
         break;
     }
@@ -1542,12 +1494,12 @@ static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg)
     case HCI_READ_RSSI:
     {
 #ifndef Display_DISABLE_ALL
-      uint16_t connHandle = BUILD_UINT16(pMsg->pReturnParam[1],
-                                         pMsg->pReturnParam[2]);
+      uint16_t connHdlr = BUILD_UINT16(pMsg->pReturnParam[1],
+                                       pMsg->pReturnParam[2]);
       int8 rssi = (int8)pMsg->pReturnParam[3];
 
       Log_info2("%s: RSSI %d dBm",
-                (uintptr_t)NetInfo_getConnAddrStr(connHandle), rssi);
+                (uintptr_t)NetInfo_getConnAddrStr(connHdlr), rssi);
 
 #endif
       break;
@@ -1731,56 +1683,10 @@ static bool connectDevice(uint8_t *pAddr)
     return (true);
 }
 
-/*********************************************************************
- * @fn      connectScannedDevice
- *
- * @brief   Establish a link to a peer device
- *
- * @param   index - item index from the menu
- *
- * @return  always true
- */
-static bool connectScannedDevice(uint8_t index)
-{
-    GapInit_connect(scanList[index].addrType & MASK_ADDRTYPE_ID,
-                    scanList[index].addr, DEFAULT_INIT_PHY, 0);
-
-    Log_info1("Connecting to %s...",
-              (uintptr_t )Util_convertBdAddr2Str(scanList[index].addr));
-
-    return (true);
-}
-
-#if 0
-/*********************************************************************
- * @fn      Central_GattRead
- *
- * @brief   GATT Read
- *
- * @param   index - item index from the menu
- *
- * @return  always true
- */
-bool Central_GattRead(uint8_t index)
-{
-    Log_warning0("Gatt read called");
-    attReadReq_t req;
-    uint8_t connIndex = NetInfo_getConnIndex (connList[0].connHandle);
-
-    // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
-    CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
-
-    req.handle = connList[0].charHandle;
-    GATT_ReadCharValue(connList[0].connHandle, &req, selfEntity);
-
-    return (true);
-}
-#endif
-
 static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg)
 {
     bStatus_t cmdResult;
-    uint16_t connHandle;
+    uint16_t connHdlr;
 
     switch (ipcMsg->msg)
     {
@@ -1797,8 +1703,8 @@ static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg)
         break;
 
     case CENTRAL_MSG_DISCONNECT_DEVICE:
-        connHandle = ((cmdDataDisconnectDevice_t *)ipcMsg->data)->conn_handle;
-        cmdResult = GAP_TerminateLinkReq(connHandle,
+        connHdlr = ((cmdDataDisconnectDevice_t *)ipcMsg->data)->conn_handle;
+        cmdResult = GAP_TerminateLinkReq(connHdlr,
                                          HCI_DISCONNECT_REMOTE_USER_TERM);
 
         Log_info1("Disconnect device request result: %d", cmdResult);
@@ -1827,29 +1733,32 @@ static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
                                    (attReadByTypeReq_t* )&characteristic,
                                    selfEntity) != SUCCESS)
         {
-            Log_error1("%s: peripheral read request failed to perform",
-                       (uintptr_t )__func__);
+            Log_error2("%s: peripheral read request for [0x%x] failed to perform",
+                       (uintptr_t )__func__, uuidRequest);
+            // TODO: IPC resp
         }
-
         break;
     }
 
 
     case PERIPHERY_MSG_WRITE:
-        attAttrType_t attr_type = {.len = UUID_DATA_LEN };
-        memcpy(attr_type.uuid, (uint8_t *) uuidRequest, sizeof(uuidRequest));
-        attReadByTypeReq_t characteristic = {1,65535, attr_type}; // TODO: handles
-
-        if (GATT_ReadUsingCharUUID(connHandle,
-                                   (attReadByTypeReq_t* )&characteristic,
-                                   selfEntity) != SUCCESS)
+    {
+        attWriteReq_t req;
+        req.handle = NetInfo_getCharHandle(connHandle,
+                                           (uint8_t *) &uuidRequest);
+        req.len = ipcMsg->len;
+        req.sig = req.cmd = 0;
+        memcpy(req.pValue, ipcMsg->data, req.len);
+        if ( GATT_WriteCharValue(connHandle, &req, selfEntity) != SUCCESS)
         {
-            Log_error1("%s: peripheral read request failed to perform",
-                       (uintptr_t )__func__);
+            Log_error2(
+                    "%s: peripheral write request for [0x%x] failed to perform",
+                    (uintptr_t )__func__, uuidRequest);
+            // TODO: IPC resp
         }
-
-        GATT_WriteCharValue(connHandle, attr_type, selfEntity);
         break;
+    }
+
 
     default:
         break;
