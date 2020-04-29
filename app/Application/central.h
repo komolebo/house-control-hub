@@ -52,6 +52,7 @@ typedef enum
     EVT_PAIR_STATE,
     EVT_PASSCODE_NEEDED,
     EVT_READ_RPA,
+    EVT_PERIODIC_SCAN,
     EVT_INSUFFICIENT_MEM
 } appEvent_t;
 

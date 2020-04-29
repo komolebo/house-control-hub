@@ -76,7 +76,6 @@ typedef struct
     uint8_t *uuids[UUID_DATA_LEN];
 } cmdRspDataConnectDevice_t;
 
-
 typedef struct
 {
     uint16_t conn_handle;
@@ -85,7 +84,7 @@ typedef struct
 typedef struct
 {
     msgPeriphery_t  msg;
-    uint16_t        conn_mask;
+    uint16_t        connHandle;
     uint8_t         uuid[UUID_DATA_LEN];
     uint16_t        len;
     uint8_t         data[IPC_MSG_MAX_DATA_SIZE];
@@ -135,8 +134,8 @@ bool send_central_ipc_msg_resp(msgCentral_t msg,
                                uint16_t len,
                                uint8_t *data);
 
-bool send_peripheral_ipc_msg(msgPeriphery_t msg,
-                             pkgType_t type,
+bool send_peripheral_ipc_msg(pkgType_t type,
+                             msgPeriphery_t msg,
                              uint16_t conn_mask,
                              uint8_t uuid[UUID_DATA_LEN],
                              uint16_t len,

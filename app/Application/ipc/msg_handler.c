@@ -151,8 +151,8 @@ bool send_central_ipc_msg_resp(msgCentral_t msg,
 }
 
 
-bool send_peripheral_ipc_msg(msgPeriphery_t msg,
-                             pkgType_t type,
+bool send_peripheral_ipc_msg(pkgType_t type,
+                             msgPeriphery_t msg,
                              uint16_t conn_mask,
                              uint8_t uuid[UUID_DATA_LEN],
                              uint16_t len,
@@ -164,7 +164,7 @@ bool send_peripheral_ipc_msg(msgPeriphery_t msg,
 
     txMessage.header.package_type = type;
     txMessage.data.peripheral_msg_data.msg = msg;
-    txMessage.data.peripheral_msg_data.conn_mask = conn_mask;
+    txMessage.data.peripheral_msg_data.connHandle = conn_mask;
     txMessage.data.peripheral_msg_data.len = len;
     memcpy(txMessage.data.peripheral_msg_data.data, data, len);
     memcpy(txMessage.data.peripheral_msg_data.uuid, uuid, UUID_DATA_LEN);

@@ -38,6 +38,8 @@
 //#include "UartLog.h"
 #include <uartlog/UartLog.h>
 #include "ipc/msg_handler.h"
+#include "ble/network_info.h"
+
 /*********************************************************************
  * CONSTANTS
  */
@@ -109,6 +111,9 @@
 
 // How often to read current current RPA (in ms)
 #define SC_READ_RPA_PERIOD                    3000
+
+// How often to scan network for devices (in ms)
+#define SCAN_PERIOD                         (3000)
 /*********************************************************************
  * TYPEDEFS
  */
@@ -128,15 +133,6 @@ typedef struct
   uint8_t addrType;         // Peer Device's Address Type
   uint8_t addr[B_ADDR_LEN]; // Peer Device Address
 } scanRec_t;
-
-// Connected device information
-typedef struct
-{
-  uint16_t connHandle;        // Connection Handle
-  uint8_t  addr[B_ADDR_LEN];  // Peer Device Address
-  uint8_t  charHandle;        // Characteristic Handle
-  Clock_Struct *pRssiClock;   // pointer to clock struct
-} connRec_t;
 
 // Container to store paring state info when passing from gapbondmgr callback
 // to app event. See the pfnPairStateCB_t documentation from the gapbondmgr.h
@@ -184,7 +180,6 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
 static uint8_t Central_processStackMsg(ICall_Hdr *pMsg);
 static void Central_processAppMsg(appEvt_t *pMsg);
 static void Central_addScanInfo(uint8_t *pAddr, uint8_t addrType);
-static uint8_t Central_getConnIndex(uint16_t connHandle);
 static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg);
 static void Central_processGapMsg(gapEventHdr_t *pMsg);
 static void Central_processPairState(uint8_t state,
@@ -194,8 +189,6 @@ static void Central_exchangeMtuSize();
 static bool SimpleCentral_findSvcUuid(uint16_t uuid, uint8_t *pData,
                                       uint16_t dataLen);
 static status_t Central_CancelRssi(uint16_t connHandle);
-static char* SimpleCentral_getConnAddrStr(uint16_t connHandle);
-static uint8_t Central_removeConnInfo(uint16_t connHandle);
 static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg);
 static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg);
 static bool connectScannedDevice(uint8_t index);
@@ -223,13 +216,8 @@ static uint8_t discConnHandle;
 static uint16_t discSvcStartHdl = 0;
 static uint16_t discSvcEndHdl = 0;
 
-// List of connections
-static connRec_t connList[MAX_NUM_BLE_CONNS];
-
-// Number of connected devices
-static uint8_t numConn = 0;
-
 // Connection handle of current connection
+static uint16_t uuidRequest = 0;
 #if 0
 static uint16_t connHandle = CONNHANDLE_INVALID;
 #endif
@@ -249,14 +237,12 @@ static GAP_Addr_Modes_t addrMode = DEFAULT_ADDRESS_MODE;
 // Maximum PDU size (default = 27 octets)
 static uint16_t scMaxPduSize;
 
-// Clock instance for RPA read events.
-static Clock_Struct clkRpaRead;
-
 // Current Random Private Address
 static uint8 rpa[B_ADDR_LEN] = {0};
 
 // Clock instance for RPA read events.
 static Clock_Struct clkRpaRead;
+static Clock_Struct clkScanDevices;
 
 
 // Value to write
@@ -311,10 +297,8 @@ static void Central_spin(void)
  *
  * @return  none
  */
-static void Central_init( )
+static void Central_init(void)
 {
-    uint8_t i;
-
     // ******************************************************************
     // N0 STACK API CALLS CAN OCCUR BEFORE THIS CALL TO ICall_registerApp
     // ******************************************************************
@@ -323,14 +307,6 @@ static void Central_init( )
     ICall_registerApp(&selfEntity, &eventSyncHandle);
 
     // Create an RTOS queue for message from profile to be sent to app.
-
-
-    // Initialize internal data
-    for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
-    {
-        connList[i].connHandle = CONNHANDLE_INVALID;
-        connList[i].pRssiClock = NULL;
-    }
 
     //  Board_initKeys(SimpleCentral_keyChangeHandler);
 
@@ -526,6 +502,11 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         /* route here peripheral request to device's GATT */
         break;
 
+    // Scan periodically
+    case EVT_PERIODIC_SCAN:
+        GapScan_enable(0, DEFAULT_SCAN_DURATION, DEFAULT_MAX_SCAN_RES);
+        break;
+
     case EVT_ADV_REPORT:
     {
         GapScan_Evt_AdvRpt_t* pAdvRpt = (GapScan_Evt_AdvRpt_t*) (pMsg->pData);
@@ -652,16 +633,17 @@ static void Central_processAppMsg(appEvt_t *pMsg)
     {
         Log_info0("Read RSSI event");
         uint8_t connIndex = pMsg->hdr.state;
-        uint16_t connHandle = connList[connIndex].connHandle;
+
+        connRec_t* conn = NetInfo_getConnInfoByInd(connIndex);
 
         // If link is still valid
-        if (connHandle != CONNHANDLE_INVALID)
+        if (conn)
         {
             // Restart timer
-            Util_startClock(connList[connIndex].pRssiClock);
+            Util_startClock(conn->pRssiClock);
 
             // Read RSSI
-            VOID HCI_ReadRssiCmd(connHandle);
+            VOID HCI_ReadRssiCmd(conn->connHandle);
         }
 
         break;
@@ -906,9 +888,8 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
  */
 static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
 {
-    static uint16_t ipcBuff[UUID_LIMIT_NUM_PER_DEVICE];
+    static uint16_t ipcRespBuff[UUID_LIMIT_NUM_PER_DEVICE];
     static uint16 discUuid = 0;
-
 
     if (discState == BLE_DISC_STATE_MTU)
     {
@@ -976,7 +957,7 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
                 Log_info2("%s: UuidDiscovery - retain characteristic: 0x%x",
                           (uintptr_t )__func__, uuid);
 
-                ipcBuff[i + discUuid] = uuid;
+                ipcRespBuff[i + discUuid] = uuid;
             }
 
             discUuid += uuidFound;
@@ -990,7 +971,7 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
             // Send IPC report to the back
             send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
                                       discUuid * ATT_BT_UUID_SIZE,
-                                      (uint8_t *)&ipcBuff);
+                                      (uint8_t *)&ipcRespBuff);
 
             // Discovery done
             discState = BLE_DISC_STATE_IDLE;
@@ -1005,29 +986,49 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
  *
  * @return  none
  */
-static void Central_processGATTMsgEvent(gattMsgEvent_t *pMsg)
+static void Central_processGATTPeripheralEvent(gattMsgEvent_t *pMsg)
 {
     static uint8_t buff_str[50];
     if (pMsg->method == ATT_READ_BY_TYPE_RSP)
     {
-        uint8_t len = pMsg->msg.readByTypeRsp.len;
-        uint8_t pairs = pMsg->msg.readByTypeRsp.numPairs;
-
-        Log_info2("%s: numPairs: %d", __func__, pairs);
-        Log_info2("%s: len: %d", __func__, len);
-
-        for (uint8_t i = 0; i < pairs; i++)
+        if (!uuidRequest)
         {
-            if (Util_convertHex2Str(pMsg->msg.readByTypeRsp.pDataList, &buff_str[0],
-                                len, 50))
-            {
-                // If UUID is of interest, store handle
-                Log_info2("%s: UUID Read result: %s", (uintptr_t )__func__,
-                          (uintptr_t )(pMsg->msg.readByTypeRsp.pDataList + 2));
-//                          (uintptr_t )buff_str);
-            }
-
+            Log_error2("%s: Unexpected read gatt response received for method: %d",
+                       (uintptr_t)__func__, pMsg->method);
         }
+
+        uint16_t attr_len = pMsg->msg.readByTypeRsp.len;
+        uint8_t pairs = pMsg->msg.readByTypeRsp.numPairs;
+        uint16_t dataLen = pMsg->msg.readByTypeRsp.dataLen;
+        uint8_t *pData = pMsg->msg.readByTypeRsp.pDataList + sizeof(dataLen);
+
+        Log_info2("%s: GattRead response - pairs found: %d",
+                  (uintptr_t )__func__, pairs);
+
+        for (uint8_t i = 0; i < pairs; i++, pData += attr_len)
+        {
+            // attribute data list contains useful data size & payload
+            if (dataLen > sizeof(dataLen))
+            {
+                if (Util_convertHex2Str(pData, &buff_str[0], attr_len,
+                                        50) == TRUE)
+                {
+                    // UUID response received, store its value
+                    Log_info3("%s: UUID Read result[%d]: %s",
+                              (uintptr_t )__func__, dataLen,
+                              (uintptr_t )(pData));
+                }
+            }
+        }
+
+        send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, PERIPHERY_MSG_READ,
+                                pMsg->connHandle, (uint8_t *) uuidRequest,
+                                dataLen, pData);
+        uuidRequest = 0;
+    }
+    else if (pMsg->method == ATT_WRITE_RSP)
+    {
+
     }
 }
 
@@ -1100,8 +1101,8 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
         }
         else
         {
-            // Not being discovered now
-            Central_processGATTMsgEvent(pMsg);
+            // Not being discovering now
+            Central_processGATTPeripheralEvent(pMsg);
 
         }
     } // else - in case a GATT message came after a connection has dropped, ignore it.
@@ -1188,13 +1189,13 @@ static uint8_t Central_processStackMsg(ICall_Hdr *pMsg)
                 if (pPUC->status != SUCCESS)
                 {
                     Log_info1("%s: PHY change failure",
-                              (uintptr_t)SimpleCentral_getConnAddrStr(pPUC->connHandle));
+                              (uintptr_t)NetInfo_getConnAddrStr(pPUC->connHandle));
                 }
                 else
                 {
                     Log_info2(
                             "%s: PHY updated to %s",
-                            (uintptr_t)SimpleCentral_getConnAddrStr(
+                            (uintptr_t)NetInfo_getConnAddrStr(
                                     pPUC->connHandle),
                             // Only symmetrical PHY is supported.
                             // rxPhy should be equal to txPhy.
@@ -1297,39 +1298,20 @@ void Central_clockHandler(UArg arg)
         Util_enqueueAppMsg(EVT_READ_RPA, 0, NULL);
         break;
 
+
+    case EVT_PERIODIC_SCAN:
+        // Restart timer
+//        Util_startClock(&clkScanDevices);
+        // Let the application handle the event
+        Util_enqueueAppMsg(EVT_PERIODIC_SCAN, 0, NULL);
+        break;
+
     default:
         break;
     }
 }
 
-/*********************************************************************
- * @fn      Central_addConnInfo
- *
- * @brief   Add a device to the connected device list
- *
- * @return  index of the connected device list entry where the new connection
- *          info is put in.
- *          if there is no room, MAX_NUM_BLE_CONNS will be returned.
- */
-static uint8_t Central_addConnInfo(uint16_t connHandle, uint8_t *pAddr)
-{
-    uint8_t i;
 
-    for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
-    {
-        if (connList[i].connHandle == CONNHANDLE_INVALID)
-        {
-            // Found available entry to put a new connection info in
-            connList[i].connHandle = connHandle;
-            memcpy(connList[i].addr, pAddr, B_ADDR_LEN);
-            numConn++;
-
-            break;
-        }
-    }
-
-    return i;
-}
 
 /*********************************************************************
  * @fn      Central_processGapMsg
@@ -1409,6 +1391,9 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
                                 SC_READ_RPA_PERIOD, 0, true, EVT_READ_RPA);
         }
 #endif // PRIVACY_1_2_CFG
+
+        Util_constructClock(&clkScanDevices, Central_clockHandler,
+                            SCAN_PERIOD, SCAN_PERIOD, true, EVT_PERIODIC_SCAN);
         break;
     }
 
@@ -1426,14 +1411,15 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         uint8_t* pStrAddr;
 
         // Add this connection info to the list
-        connIndex = Central_addConnInfo(connHandle, pAddr);
+        connIndex = NetInfo_addConnInfo(connHandle, pAddr);
 
         // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
         CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
 
-        connList[connIndex].charHandle = 0;
+        NetInfo_initCharHandles(connIndex);
 
-        pStrAddr = (uint8_t*) Util_convertBdAddr2Str(connList[connIndex].addr);
+        pStrAddr = (uint8_t*) Util_convertBdAddr2Str(
+                NetInfo_getConnInfoByInd(connIndex)->addr);
 
         Log_info1("Connected to %s", (uintptr_t)pStrAddr);
         Log_info1("Num Conns: %d", numConn);
@@ -1461,12 +1447,13 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Central_CancelRssi(connHandle);
 
         // Mark this connection deleted in the connected device list.
-        connIndex = Central_removeConnInfo(connHandle);
+        connIndex = NetInfo_removeConnInfo(connHandle);
 
         // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
         CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
 
-        pStrAddr = (uint8_t*) Util_convertBdAddr2Str(connList[connIndex].addr);
+        pStrAddr = (uint8_t*) Util_convertBdAddr2Str(
+                NetInfo_getConnInfoByInd(connIndex)->addr);
 
         Log_info1("%s is disconnected", (uintptr_t)pStrAddr);
         Log_info1("Num Conns: %d", numConn);
@@ -1475,22 +1462,6 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
                                           sizeof(connHandle),
                                           (uint8_t *)&connHandle);
 
-#if 0
-        for (i = 0; i < TBM_GET_NUM_ITEM(&scMenuConnect); i++)
-        {
-            if (!memcmp(TBM_GET_ACTION_DESC(&scMenuConnect, i), pStrAddr,
-                        SC_ADDR_STR_SIZE))
-            {
-                // Enable this device in the connection choices
-                tbm_setItemStatus(&scMenuConnect, 1 << i, SC_ITEM_NONE);
-            }
-
-            if (TBM_IS_ITEM_ACTIVE(&scMenuConnect, i))
-            {
-                numConnectable++;
-            }
-        }
-#endif
         break;
     }
 
@@ -1576,7 +1547,7 @@ static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg)
       int8 rssi = (int8)pMsg->pReturnParam[3];
 
       Log_info2("%s: RSSI %d dBm",
-                (uintptr_t)SimpleCentral_getConnAddrStr(connHandle), rssi);
+                (uintptr_t)NetInfo_getConnAddrStr(connHandle), rssi);
 
 #endif
       break;
@@ -1649,11 +1620,9 @@ static void Central_processPairState(uint8_t state, scPairStateData_t* pPairData
                               (uintptr_t)Util_convertBdAddr2Str(linkInfo.addr));
 
                     // Update the connection list with the ID address
-                    uint8_t i = Central_getConnIndex(
-                            pPairData->connHandle);
-
-                    CENTRAL_ASSERT(i < MAX_NUM_BLE_CONNS);
-                    memcpy(connList[i].addr, linkInfo.addr, B_ADDR_LEN);
+//                    CENTRAL_ASSERT(i < MAX_NUM_BLE_CONNS);
+                    memcpy(NetInfo_getConnInfo(pPairData->connHandle)->addr,
+                           linkInfo.addr, B_ADDR_LEN);
                 }
             }
 #endif // PRIVACY_1_2_CFG
@@ -1708,29 +1677,6 @@ static void Central_processPasscode(scPasscodeData_t *pData)
 
 
 /*********************************************************************
- * @fn      Central_getConnIndex
- *
- * @brief   Find index in the connected device list by connHandle
- *
- * @return  the index of the entry that has the given connection handle.
- *          if there is no match, MAX_NUM_BLE_CONNS will be returned.
- */
-static uint8_t Central_getConnIndex(uint16_t connHandle)
-{
-  uint8_t i;
-
-  for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
-  {
-    if (connList[i].connHandle == connHandle)
-    {
-      break;
-    }
-  }
-
-  return i;
-}
-
-/*********************************************************************
  * @fn      Central_CancelRssi
  *
  * @brief   Cancel periodic RSSI reads on a link.
@@ -1742,81 +1688,29 @@ static uint8_t Central_getConnIndex(uint16_t connHandle)
  */
 static status_t Central_CancelRssi(uint16_t connHandle)
 {
-    uint8_t connIndex = Central_getConnIndex(connHandle);
+    connRec_t* conn = NetInfo_getConnInfo(connHandle);
 
-    // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
-    CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
+    CENTRAL_ASSERT(conn != NULL);
 
     // If already running
-    if (connList[connIndex].pRssiClock == NULL)
+    if (conn->pRssiClock == NULL)
     {
         return bleIncorrectMode;
     }
 
     // Stop timer
-    Util_stopClock(connList[connIndex].pRssiClock);
+    Util_stopClock(conn->pRssiClock);
 
     // Destroy the clock object
-    Clock_destruct(connList[connIndex].pRssiClock);
+    Clock_destruct(conn->pRssiClock);
 
     // Free clock struct
-    ICall_free(connList[connIndex].pRssiClock);
-    connList[connIndex].pRssiClock = NULL;
+    ICall_free(conn->pRssiClock);
+    conn->pRssiClock = NULL;
 
     return SUCCESS;
 }
 
-/*********************************************************************
- * @fn      SimpleCentral_getConnAddrStr
- *
- * @brief   Return, in string form, the address of the peer associated with
- *          the connHandle.
- *
- * @return  A null-terminated string of the address.
- *          if there is no match, NULL will be returned.
- */
-static char* SimpleCentral_getConnAddrStr(uint16_t connHandle)
-{
-  uint8_t i;
-
-  for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
-  {
-    if (connList[i].connHandle == connHandle)
-    {
-      return Util_convertBdAddr2Str(connList[i].addr);
-    }
-  }
-
-  return NULL;
-}
-
-/*********************************************************************
- * @fn      Central_removeConnInfo
- *
- * @brief   Remove a device from the connected device list
- *
- * @return  index of the connected device list entry where the new connection
- *          info is removed from.
- *          if connHandle is not found, MAX_NUM_BLE_CONNS will be returned.
- */
-static uint8_t Central_removeConnInfo(uint16_t connHandle)
-{
-    uint8_t i;
-
-    for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
-    {
-        if (connList[i].connHandle == connHandle)
-        {
-            // Found the entry to mark as deleted
-            connList[i].connHandle = CONNHANDLE_INVALID;
-            numConn--;
-
-            break;
-        }
-    }
-
-    return i;
-}
 
 /*********************************************************************
  * @fn      connectDevice
@@ -1857,6 +1751,7 @@ static bool connectScannedDevice(uint8_t index)
     return (true);
 }
 
+#if 0
 /*********************************************************************
  * @fn      Central_GattRead
  *
@@ -1870,7 +1765,7 @@ bool Central_GattRead(uint8_t index)
 {
     Log_warning0("Gatt read called");
     attReadReq_t req;
-    uint8_t connIndex = Central_getConnIndex(connList[0].connHandle);
+    uint8_t connIndex = NetInfo_getConnIndex (connList[0].connHandle);
 
     // connIndex cannot be equal to or greater than MAX_NUM_BLE_CONNS
     CENTRAL_ASSERT(connIndex < MAX_NUM_BLE_CONNS);
@@ -1880,7 +1775,7 @@ bool Central_GattRead(uint8_t index)
 
     return (true);
 }
-
+#endif
 
 static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg)
 {
@@ -1917,17 +1812,16 @@ static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg)
 
 static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
 {
-//    bStatus_t cmdResult;
-//    uint16_t connHandle;
-    uint16_t connHandle = ipcMsg->conn_mask;
+    uint16_t connHandle = ipcMsg->connHandle;
+    uuidRequest = *(uint16_t *)&ipcMsg->uuid; // TODO: endians
 
     switch (ipcMsg->msg)
     {
     case PERIPHERY_MSG_READ:
     {
         attAttrType_t attr_type = {.len = UUID_DATA_LEN };
-        memcpy(attr_type.uuid, ipcMsg->uuid, sizeof(ipcMsg->uuid));
-        attReadByTypeReq_t characteristic = {1,65535, attr_type};
+        memcpy(attr_type.uuid, (uint8_t *) uuidRequest, sizeof(uuidRequest));
+        attReadByTypeReq_t characteristic = {1,65535, attr_type}; // TODO: handles
 
         if (GATT_ReadUsingCharUUID(connHandle,
                                    (attReadByTypeReq_t* )&characteristic,
@@ -1937,13 +1831,24 @@ static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
                        (uintptr_t )__func__);
         }
 
-
-
         break;
     }
 
 
     case PERIPHERY_MSG_WRITE:
+        attAttrType_t attr_type = {.len = UUID_DATA_LEN };
+        memcpy(attr_type.uuid, (uint8_t *) uuidRequest, sizeof(uuidRequest));
+        attReadByTypeReq_t characteristic = {1,65535, attr_type}; // TODO: handles
+
+        if (GATT_ReadUsingCharUUID(connHandle,
+                                   (attReadByTypeReq_t* )&characteristic,
+                                   selfEntity) != SUCCESS)
+        {
+            Log_error1("%s: peripheral read request failed to perform",
+                       (uintptr_t )__func__);
+        }
+
+        GATT_WriteCharValue(connHandle, attr_type, selfEntity);
         break;
 
     default:

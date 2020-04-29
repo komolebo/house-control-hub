@@ -120,7 +120,7 @@ static Queue_Struct appMsg;
  * @return  Clock_Handle  - a handle to the clock instance.
  */
 Clock_Handle Util_constructClock(Clock_Struct *pClock,
-Clock_FuncPtr clockCB,
+                                 Clock_FuncPtr clockCB,
                                  uint32_t clockDuration, uint32_t clockPeriod,
                                  uint8_t startFlag, UArg arg)
 {
