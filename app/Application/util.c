@@ -63,6 +63,7 @@
 #include "bcomdef.h"
 #include "util.h"
 #include "ipc/uart_handler.h"
+#include <uartlog/UartLog.h>
 
 /*********************************************************************
  * TYPEDEFS
@@ -440,7 +441,8 @@ bool Util_convertHex2Str(const uint8_t *hex_arr, uint8_t *str_arr, uint16_t hex_
      * */
     if (2 * hex_len + 1 > str_len)
     {
-        Log_error("%s: not enough string space to place hex array", __func__);
+        Log_error1("%s: not enough string space to place hex array",
+                   (uintptr_t )__func__);
         return FALSE;
     }
 

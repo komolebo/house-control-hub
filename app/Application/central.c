@@ -906,6 +906,10 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
  */
 static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
 {
+    static uint16_t ipcBuff[UUID_LIMIT_NUM_PER_DEVICE];
+    static uint16 discUuid = 0;
+
+
     if (discState == BLE_DISC_STATE_MTU)
     {
         // MTU size response received, discover services
@@ -919,18 +923,19 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
     }
     else if (discState == BLE_DISC_STATE_SVC)
     {
-        // Service found, store handles
-        //if (pMsg->method == ATT_FIND_BY_TYPE_VALUE_RSP &&
-        if (pMsg->method == ATT_READ_BY_GRP_TYPE_RSP
-                && pMsg->msg.findByTypeValueRsp.numInfo > 0)
+        // Services found, store handles
+        uint8_t svcNum = ((attReadByGrpTypeRsp_t *)&pMsg->msg)->numGrps;
+
+        if ((pMsg->method == ATT_READ_BY_GRP_TYPE_RSP) && (svcNum > 0))
         {
             discSvcStartHdl = ATT_ATTR_HANDLE(
                     pMsg->msg.findByTypeValueRsp.pHandlesInfo, 0);
             discSvcEndHdl = ATT_GRP_END_HANDLE(
-                    pMsg->msg.findByTypeValueRsp.pHandlesInfo, 0);
+                    pMsg->msg.findByTypeValueRsp.pHandlesInfo, svcNum - 1);
 
-            Log_info2("%s: ServiceDiscovery - groups found: %d", (uintptr_t)__func__,
-                      ((attReadByGrpTypeRsp_t *)&pMsg->msg)->numGrps);
+            Log_info2("%s: ServiceDiscovery - found: %d",
+                      (uintptr_t )__func__,
+                      ((attReadByGrpTypeRsp_t * )&pMsg->msg)->numGrps);
         }
 
         // If procedure complete
@@ -941,6 +946,8 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
             if (discSvcStartHdl != 0)
             {
                 discState = BLE_DISC_STATE_UUID;
+                discUuid = 0;
+
                 GATT_DiscAllChars(discConnHandle, discSvcStartHdl, discSvcEndHdl,
                                   selfEntity);
             }
@@ -948,15 +955,15 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
     }
     else if (discState == BLE_DISC_STATE_UUID)
     {
-        uint16_t ipcBuff[UUID_LIMIT_NUM_PER_DEVICE];
-        uint16 uuidFound;
-
-        uuidFound = pMsg->msg.readByTypeRsp.numPairs;
+        uint16_t uuidFound = pMsg->msg.readByTypeRsp.numPairs;
 
         // Characteristic descriptors found
         if (pMsg->method == ATT_READ_BY_TYPE_RSP && uuidFound > 0)
         {
             uint8_t len = pMsg->msg.readByTypeRsp.len;
+
+            Log_info2("%s: UuidDiscovery - found: %d",
+                      (uintptr_t )__func__, uuidFound);
 
             // For each characteristic declaration
             for (uint8_t i = 0, *p = pMsg->msg.readByTypeRsp.pDataList; i < uuidFound;
@@ -966,19 +973,61 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
                 uint16_t uuid = BUILD_UINT16(p[len - 2], p[len - 1]);
 
                 // If UUID is of interest, store handle
-                Log_info2("%s: UuidDiscovery - found characteristic: 0x%x",
+                Log_info2("%s: UuidDiscovery - retain characteristic: 0x%x",
                           (uintptr_t )__func__, uuid);
 
-                ipcBuff[i] = uuid;
+                ipcBuff[i + discUuid] = uuid;
             }
-        }
-        // Discovery done
-        discState = BLE_DISC_STATE_IDLE;
 
-        // Send IPC report to the back
-        send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
-                                  uuidFound * ATT_BT_UUID_SIZE,
-                                  (uint8_t *)&ipcBuff);
+            discUuid += uuidFound;
+        }
+
+        // If procedure complete
+        if (((pMsg->method == ATT_READ_BY_TYPE_RSP)
+                && (pMsg->hdr.status == bleProcedureComplete))
+                || (pMsg->method == ATT_ERROR_RSP))
+        {
+            // Send IPC report to the back
+            send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
+                                      discUuid * ATT_BT_UUID_SIZE,
+                                      (uint8_t *)&ipcBuff);
+
+            // Discovery done
+            discState = BLE_DISC_STATE_IDLE;
+        }
+    }
+}
+
+/*********************************************************************
+ * @fn      Central_processGATTMsgEvent
+ *
+ * @brief   Process GATT discovery event
+ *
+ * @return  none
+ */
+static void Central_processGATTMsgEvent(gattMsgEvent_t *pMsg)
+{
+    static uint8_t buff_str[50];
+    if (pMsg->method == ATT_READ_BY_TYPE_RSP)
+    {
+        uint8_t len = pMsg->msg.readByTypeRsp.len;
+        uint8_t pairs = pMsg->msg.readByTypeRsp.numPairs;
+
+        Log_info2("%s: numPairs: %d", __func__, pairs);
+        Log_info2("%s: len: %d", __func__, len);
+
+        for (uint8_t i = 0; i < pairs; i++)
+        {
+            if (Util_convertHex2Str(pMsg->msg.readByTypeRsp.pDataList, &buff_str[0],
+                                len, 50))
+            {
+                // If UUID is of interest, store handle
+                Log_info2("%s: UUID Read result: %s", (uintptr_t )__func__,
+                          (uintptr_t )(pMsg->msg.readByTypeRsp.pDataList + 2));
+//                          (uintptr_t )buff_str);
+            }
+
+        }
     }
 }
 
@@ -992,6 +1041,7 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
  */
 static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
 {
+//    Log_error1("DEBUG: RECEIVED GATT MSG: 0x%x", pMsg->method);
     if (linkDB_Up(pMsg->connHandle))
     {
         // See if GATT server was unable to transmit an ATT response
@@ -1047,6 +1097,12 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
         else if (discState != BLE_DISC_STATE_IDLE)
         {
             Central_processGATTDiscEvent(pMsg);
+        }
+        else
+        {
+            // Not being discovered now
+            Central_processGATTMsgEvent(pMsg);
+
         }
     } // else - in case a GATT message came after a connection has dropped, ignore it.
 
@@ -1863,11 +1919,29 @@ static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
 {
 //    bStatus_t cmdResult;
 //    uint16_t connHandle;
+    uint16_t connHandle = ipcMsg->conn_mask;
 
     switch (ipcMsg->msg)
     {
     case PERIPHERY_MSG_READ:
+    {
+        attAttrType_t attr_type = {.len = UUID_DATA_LEN };
+        memcpy(attr_type.uuid, ipcMsg->uuid, sizeof(ipcMsg->uuid));
+        attReadByTypeReq_t characteristic = {1,65535, attr_type};
+
+        if (GATT_ReadUsingCharUUID(connHandle,
+                                   (attReadByTypeReq_t* )&characteristic,
+                                   selfEntity) != SUCCESS)
+        {
+            Log_error1("%s: peripheral read request failed to perform",
+                       (uintptr_t )__func__);
+        }
+
+
+
         break;
+    }
+
 
     case PERIPHERY_MSG_WRITE:
         break;
