@@ -213,10 +213,6 @@ static scanRec_t scanList[DEFAULT_MAX_SCAN_RES];
 static uint8_t discState = BLE_DISC_STATE_IDLE;
 static uint8_t discConnHandle;
 
-// Discovered service start and end handle
-static uint16_t discSvcStartHdl = 0;
-static uint16_t discSvcEndHdl = 0;
-
 // Connection handle of current connection
 static uint16_t uuidRequest = 0;
 
@@ -524,7 +520,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
             Log_info1("Discovered: %s",
                       (uintptr_t)Util_convertBdAddr2Str(pAdvRpt->addr));
 
-//            connectDevice(pAdvRpt->addr);
+            connectDevice(pAdvRpt->addr);
 //            connectScannedDevice(0);
         }
 
@@ -544,9 +540,6 @@ static void Central_processAppMsg(appEvt_t *pMsg)
     {
         Log_info0("Scan disabled");
         uint8_t numReport;
-        uint8_t i;
-        static uint8_t* pAddrs = NULL;
-        uint8_t* pAddrTemp;
 #if (DEFAULT_DEV_DISC_BY_SVC_UUID == TRUE)
         numReport = numScanRes;
 #else // !DEFAULT_DEV_DISC_BY_SVC_UUID
@@ -557,13 +550,6 @@ static void Central_processAppMsg(appEvt_t *pMsg)
 
         Log_info1("%d device(s) discovered", numReport);
 //        connectDevice(scanList[0].addr);
-
-        // Allocate buffer to display addresses
-        if (pAddrs != NULL)
-        {
-            // A scan has been done previously, release the previously allocated buffer
-            ICall_free(pAddrs);
-        }
         break;
     }
 
@@ -831,8 +817,7 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
  */
 static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
 {
-    static uint16_t ipcRespBuff[UUID_LIMIT_NUM_PER_DEVICE];
-    static uint16 discUuid = 0;
+    static uint8_t ipcRespBuff[CHARS_PER_DEVICE * ATT_BT_UUID_SIZE];
 
     if (discState == BLE_DISC_STATE_MTU)
     {
@@ -850,37 +835,81 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
         // Services found, store handles
         uint8_t svcNum = ((attReadByGrpTypeRsp_t *)&pMsg->msg)->numGrps;
 
-        if ((pMsg->method == ATT_READ_BY_GRP_TYPE_RSP) && (svcNum > 0))
-        {
-            discSvcStartHdl = ATT_ATTR_HANDLE(
-                    pMsg->msg.findByTypeValueRsp.pHandlesInfo, 0);
-            discSvcEndHdl = ATT_GRP_END_HANDLE(
-                    pMsg->msg.findByTypeValueRsp.pHandlesInfo, svcNum - 1);
-
-            Log_info2("%s: ServiceDiscovery - found: %d",
-                      (uintptr_t )__func__,
-                      ((attReadByGrpTypeRsp_t * )&pMsg->msg)->numGrps);
-        }
+        Log_info2("%s: services discovered: %u", (uintptr_t )__func__, svcNum);
 
         // If procedure complete
         if (((pMsg->method == ATT_READ_BY_GRP_TYPE_RSP)
                 && (pMsg->hdr.status == bleProcedureComplete))
                 || (pMsg->method == ATT_ERROR_RSP))
         {
-            if (discSvcStartHdl != 0)
-            {
-                discState = BLE_DISC_STATE_UUID;
-                discUuid = 0;
+            discState = BLE_DISC_STATE_UUID;
 
-                GATT_DiscAllChars(discConnHandle, discSvcStartHdl, discSvcEndHdl,
-                                  selfEntity);
-            }
+            GATT_DiscAllCharDescs(discConnHandle, 0x001, 0xFFFF, selfEntity);
         }
     }
     else if (discState == BLE_DISC_STATE_UUID)
     {
-        uint16_t uuidFound = pMsg->msg.readByTypeRsp.numPairs;
+        if (pMsg->method == ATT_FIND_INFO_RSP)
+        {
+            // if 2 byte UUID format received
+            attFindInfoRsp_t* rsp = (attFindInfoRsp_t *)&pMsg->msg.findInfoRsp;
 
+            if (rsp->format == ATT_HANDLE_BT_UUID_TYPE)
+            {
+                for (uint8_t i = 0, *p = rsp->pInfo; i < rsp->numInfo;
+                        i++, p += sizeof(charInfo_t))
+                {
+                    uint16_t charHandle = BUILD_UINT16(p[0], p[1]);
+                    uint16_t charValue = BUILD_UINT16(p[2], p[3]);
+
+                    // Save only data UUIDs
+                    if (charValue != GATT_PRIMARY_SERVICE_UUID
+                            && charValue != GATT_SECONDARY_SERVICE_UUID
+                            && charValue != GATT_INCLUDE_UUID
+                            && charValue != GATT_CHARACTER_UUID
+                            && charValue != GATT_CHAR_USER_DESC_UUID
+                            && charValue != GATT_CLIENT_CHAR_CFG_UUID)
+                    {
+                        Log_info2("%s: discovered UUID: 0x%x",
+                                  (uintptr_t )__func__, charValue);
+
+                        uint8_t connIndex = NetInfo_addCharHandle(
+                                pMsg->connHandle, (uint8_t *) &charValue,
+                                charHandle);
+
+                        if (connIndex == CHARS_PER_DEVICE)
+                        {
+                            Log_error2("%s: Not enough memory for char handle 0x%x",
+                                    (uintptr_t )__func__, charValue);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If procedure complete
+        if (((pMsg->method == ATT_FIND_INFO_RSP)
+                && (pMsg->hdr.status == bleProcedureComplete))
+                || (pMsg->method == ATT_ERROR_RSP))
+        {
+            Log_info1("%s: Discovery done", (uintptr_t )__func__);
+
+            // Send IPC report to the back
+            uint8_t bytes_populated = NetInfo_populateUuidIpcResp(
+                    pMsg->connHandle, &ipcRespBuff[0],
+                    CHARS_PER_DEVICE * ATT_BT_UUID_SIZE);
+
+            send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
+                                      bytes_populated,
+                                      (uint8_t *)&ipcRespBuff);
+
+            // Discovery done
+            discState = BLE_DISC_STATE_IDLE;
+        }
+
+
+#if 0
+        uint16_t uuidFound = pMsg->msg.readByTypeRsp.numPairs;
         // Characteristic descriptors found
         if (pMsg->method == ATT_READ_BY_TYPE_RSP && uuidFound > 0)
         {
@@ -923,6 +952,7 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
             // Discovery done
             discState = BLE_DISC_STATE_IDLE;
         }
+#endif
     }
 }
 
@@ -1520,9 +1550,6 @@ static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg)
 static void Central_exchangeMtuSize()
 {
     attExchangeMTUReq_t req;
-
-    // Initialize cached handles
-    discSvcStartHdl = discSvcEndHdl = 0;
 
     discState = BLE_DISC_STATE_MTU;
 

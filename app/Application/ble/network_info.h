@@ -14,8 +14,8 @@
 #include "profiles_if.h"
 
 
-
-#define CHARS_PER_DEVICE    (20)
+#define CHARS_PER_DEVICE        (20)
+#define TOTAL_CHARS_NUM     (CHARS_PER_DEVICE * MAX_NUM_BLE_CONNS)
 
 
 typedef struct
@@ -40,15 +40,17 @@ void NetInfo_initCharHandles(uint8_t index);
 
 uint8_t     NetInfo_addConnInfo(uint16_t connHandle, uint8_t *pAddr);
 uint8_t     NetInfo_removeConnInfo(uint16_t connHandle);
-uint16_t    NetInfo_addCharHandle(uint16_t connHandle,
+uint8_t     NetInfo_addCharHandle(uint16_t connHandle,
                                   uint8_t charValue[UUID_DATA_LEN],
-                                  uint8_t charHandle);
+                                  uint16_t charHandle);
 uint8_t     NetInfo_getConnIndex(uint16_t connHandle);
 connRec_t * NetInfo_getConnInfo(uint16_t connHandle);
 connRec_t * NetInfo_getConnInfoByInd(uint8_t index);
 char *      NetInfo_getConnAddrStr(uint16_t connHandle);
 uint16_t    NetInfo_getCharHandle(uint16_t connHandle,
                                   uint8_t charValue[UUID_DATA_LEN]);
+uint8_t     NetInfo_populateUuidIpcResp(uint16_t connHandle, uint8_t *buf,
+                                        uint8_t len);
 
 extern uint8_t numConn;
 

@@ -197,9 +197,9 @@ char* NetInfo_getConnAddrStr(uint16_t connHandle)
     return NULL;
 }
 
-uint16_t NetInfo_addCharHandle(uint16_t connHandle,
+uint8_t NetInfo_addCharHandle(uint16_t connHandle,
                                uint8_t charValue[UUID_DATA_LEN],
-                               uint8_t charHandle)
+                               uint16_t charHandle)
 {
     connRec_t* conn = NetInfo_getConnInfo(connHandle);
 
@@ -217,7 +217,7 @@ uint16_t NetInfo_addCharHandle(uint16_t connHandle,
         }
     }
 
-    return CONNHANDLE_INVALID;
+    return CHARS_PER_DEVICE;
 }
 
 uint16_t NetInfo_getCharHandle(uint16_t connHandle,
@@ -237,4 +237,29 @@ uint16_t NetInfo_getCharHandle(uint16_t connHandle,
     }
 
     return CONNHANDLE_INVALID;
+}
+
+uint8_t NetInfo_populateUuidIpcResp(uint16_t connHandle, uint8_t *buf,
+                                    uint8_t len)
+{
+    uint8_t uuidCount = 0;
+    connRec_t* conn = NetInfo_getConnInfo(connHandle);
+
+    if (conn == NULL || len < CHARS_PER_DEVICE * ATT_BT_UUID_SIZE)
+    {
+        // TODO: Add assert here
+        return 0;
+    }
+
+    for (uint8_t i = 0; i < CHARS_PER_DEVICE; i++)
+    {
+        if (conn->charData[i].charHandle != GATT_INVALID_HANDLE)
+        {
+            memcpy(&buf[uuidCount * ATT_BT_UUID_SIZE], conn->charData[i].charValue,
+                   ATT_BT_UUID_SIZE);
+            uuidCount++;
+        }
+    }
+
+    return uuidCount * ATT_BT_UUID_SIZE;
 }
