@@ -5,14 +5,13 @@
  *      Author: Oleh
  */
 
-#include "icall_ble_api.h"
+#include <network/net_discovery.h>
+#include <network/net_info.h>
+#include <network/net_request.h>
 #include <uartlog/UartLog.h>
 #include <string.h>
 
 #include "profiles_if.h"
-#include "network_discovery.h"
-#include "network_request.h"
-#include "network_info.h"
 #include "util.h"
 #include "ipc/msg_handler.h"
 #include "central.h"

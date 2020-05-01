@@ -5,8 +5,8 @@
  *      Author: Oleh
  */
 
-#ifndef APPLICATION_NETWORK_NETWORK_INFO_H_
-#define APPLICATION_NETWORK_NETWORK_INFO_H_
+#ifndef APPLICATION_NETWORK_NET_INFO_H_
+#define APPLICATION_NETWORK_NET_INFO_H_
 
 #include <bcomdef.h>
 #include <ti/sysbios/knl/Clock.h>
@@ -57,4 +57,4 @@ uint8_t     NetInfo_populateUuidIpcResp(uint16_t connHandle, uint8_t *buf,
 extern uint8_t numConn;
 
 
-#endif /* APPLICATION_NETWORK_NETWORK_INFO_H_ */
+#endif /* APPLICATION_NETWORK_NET_INFO_H_ */

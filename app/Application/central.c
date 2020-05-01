@@ -25,12 +25,9 @@
 #include "board.h"
 
 #include <ble_user_config.h>
-#include <network/network_info.h>
-#include <network/network_request.h>
-#include <network/network_discovery.h>
-
-//#include "simple_gatt_profile.h"
-
+#include <network/net_discovery.h>
+#include <network/net_info.h>
+#include <network/net_request.h>
 #include "central.h"
 
 //#include <uartlog/UartLog.h>  // Comment out if using xdc Log
@@ -1470,15 +1467,39 @@ static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
 
     switch (ipcMsg->msg)
     {
-    case PERIPHERY_MSG_READ:
+    case PERIPHERY_MSG_READ_VAL:
     {
-        status = NetReq_processIpcReadPeripheral(ipcMsg);
+        status = NetReq_processIpcReadValPeripheral(ipcMsg);
         break;
     }
 
-    case PERIPHERY_MSG_WRITE:
+    case PERIPHERY_MSG_WRITE_VAL:
     {
-        status = NetReq_processIpcWritePeripheral(ipcMsg);
+        status = NetReq_processIpcWriteValPeripheral(ipcMsg);
+        break;
+    }
+
+    case PERIPHERY_MSG_READ_CFG:
+    {
+        status = NetReq_processIpcReadCfgPeripheral(ipcMsg);
+        break;
+    }
+
+    case PERIPHERY_MSG_WRITE_CFG:
+    {
+        status = NetReq_processIpcWriteCfgPeripheral(ipcMsg);
+        break;
+    }
+
+    case PERIPHERY_MSG_READ_MULTIPLE:
+    {
+
+        break;
+    }
+
+    case PERIPHERY_MSG_WRITE_MULTIPLE:
+    {
+
         break;
     }
 

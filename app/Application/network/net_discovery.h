@@ -5,9 +5,12 @@
  *      Author: Oleh
  */
 
-#ifndef APPLICATION_NETWORK_NETWORK_DISCOVERY_H_
-#define APPLICATION_NETWORK_NETWORK_DISCOVERY_H_
+#ifndef APPLICATION_NETWORK_NET_DISCOVERY_H_
+#define APPLICATION_NETWORK_NET_DISCOVERY_H_
 
+
+#include "icall_ble_api.h"
+#include <bcomdef.h>
 
 
 // Discovery states
@@ -28,4 +31,4 @@ void NetDisc_processGATTEvent(gattMsgEvent_t *pMsg);
 extern uint8_t discState;
 
 
-#endif /* APPLICATION_NETWORK_NETWORK_DISCOVERY_H_ */
+#endif /* APPLICATION_NETWORK_NET_DISCOVERY_H_ */
