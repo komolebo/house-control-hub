@@ -66,5 +66,6 @@ extern void Central_createTask();
 extern void AssertHandler(uint8_t assertCause, uint8_t assertSubcause);
 
 extern Display_Handle dispHandle;
+extern ICall_EntityID selfEntity;
 
 #endif /* APPLICATION_CENTRAL_CENTRAL_H_ */

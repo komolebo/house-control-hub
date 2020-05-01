@@ -39,6 +39,7 @@
 #include <uartlog/UartLog.h>
 #include "ipc/msg_handler.h"
 #include "ble/network_info.h"
+#include "ble/network_request.h"
 
 /*********************************************************************
  * CONSTANTS
@@ -210,9 +211,6 @@ static scanRec_t scanList[DEFAULT_MAX_SCAN_RES];
 // Discovery state
 static uint8_t discState = BLE_DISC_STATE_IDLE;
 static uint8_t discConnHandle;
-
-// Connection handle of current connection
-static uint16_t uuidRequest = 0;
 
 // Entity ID globally used to check for source and/or destination of messages
 
@@ -906,57 +904,6 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
 }
 
 /*********************************************************************
- * @fn      Central_processGATTMsgEvent
- *
- * @brief   Process GATT discovery event
- *
- * @return  none
- */
-static void Central_processGATTPeripheralEvent(gattMsgEvent_t *pMsg)
-{
-    if (pMsg->method == ATT_READ_BY_TYPE_RSP)
-    {
-        if (!uuidRequest)
-        {
-            Log_error2("%s: Unexpected read gatt response received for method: %d",
-                       (uintptr_t)__func__, pMsg->method);
-        }
-
-        attReadByTypeRsp_t* resp = &pMsg->msg.readByTypeRsp;
-//        uint16_t attr_len = pMsg->msg.readByTypeRsp.len;
-        static uint16_t data = 0;
-        uint16_t len = resp->len;
-
-        if (len)
-        {
-            memcpy((uint8_t *)&data, resp->pDataList + 2, len - 2);
-        }
-
-        Log_info4("%s: GattRead response - dataLen: %d, len: %d, data: 0x%x",
-                  (uintptr_t )__func__, len, len, data);
-
-        // If procedure complete
-        if (((pMsg->method == ATT_READ_BY_TYPE_RSP)
-                && (pMsg->hdr.status == bleProcedureComplete))/*
-                || (pMsg->method == ATT_ERROR_RSP)*/)
-        {
-            send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, PERIPHERY_MSG_READ,
-                                    pMsg->connHandle, (uint8_t *) &uuidRequest,
-                                    sizeof(data), (uint8_t *)&data);
-            uuidRequest = 0;
-        }
-    }
-    else if (pMsg->method == ATT_WRITE_RSP)
-    {
-        send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, PERIPHERY_MSG_WRITE,
-                                pMsg->connHandle, (uint8_t*) &uuidRequest,
-                                0, NULL);
-        uuidRequest = 0;
-    }
-}
-
-
-/*********************************************************************
  * @fn      Central_processGATTMsg
  *
  * @brief   Process GATT messages and events.
@@ -1024,7 +971,7 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
         else
         {
             // Not being discovering now
-            Central_processGATTPeripheralEvent(pMsg);
+            NetReq_processGATTExtEvent(pMsg);
 
         }
     } // else - in case a GATT message came after a connection has dropped, ignore it.
@@ -1685,76 +1632,19 @@ static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg)
 
 static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
 {
-    bStatus_t ret_stat = FAILURE;
-    uint16_t connHandle = ipcMsg->connHandle;
-
-    uuidRequest = *(uint16_t *)&ipcMsg->uuid; // TODO: endians
+    bStatus_t status = FAILURE;
 
     switch (ipcMsg->msg)
     {
     case PERIPHERY_MSG_READ:
     {
-        attAttrType_t attr_type = {.len = UUID_DATA_LEN };
-        memcpy(attr_type.uuid, (uint8_t *) &uuidRequest, sizeof(uuidRequest));
-
-        attReadByTypeReq_t readReq = { 0x001, 0xFFFF, attr_type };
-
-        if (GATT_ReadUsingCharUUID(connHandle, (attReadByTypeReq_t* )&readReq,
-                                   selfEntity) != SUCCESS)
-        {
-            Log_error2("%s: peripheral read request for [0x%x] failed to perform",
-                       (uintptr_t )__func__, uuidRequest);
-        }
-        else
-        {
-            ret_stat = SUCCESS;
-        }
+        status = NetReq_processIpcReadPeripheral(ipcMsg);
         break;
     }
 
     case PERIPHERY_MSG_WRITE:
     {
-        attWriteReq_t writeReq;
-
-        if ((writeReq.handle = NetInfo_getCharHandle(connHandle,
-                                                (uint8_t *) &uuidRequest))
-                == CONNHANDLE_INVALID)
-        {
-            Log_error2("%s: handle doesn't exist for 0x%x",
-                                   (uintptr_t )__func__, uuidRequest);
-        }
-        else
-        {
-            writeReq.len = ipcMsg->len;
-            writeReq.pValue = GATT_bm_alloc(connHandle, ATT_WRITE_REQ,
-                                            writeReq.len, NULL);
-            if (writeReq.pValue == NULL)
-            {
-                Log_error1("%s: not enough memory in GATT platform",
-                           (uintptr_t )__func__);
-            }
-            else
-            {
-                writeReq.sig = writeReq.cmd = 0;
-                memcpy(writeReq.pValue, ipcMsg->data, writeReq.len);
-
-                Log_info4("%s: writing UUID: 0x%x, len: %d, value: 0x%x",
-                          (uintptr_t)__func__, uuidRequest, writeReq.len,
-                          *writeReq.pValue);
-
-                if (GATT_WriteCharValue(connHandle, &writeReq,
-                        selfEntity) != SUCCESS)
-                {
-                    Log_error2("%s: failed write request for [0x%x]",
-                               (uintptr_t )__func__, uuidRequest);
-                    GATT_bm_free((gattMsg_t *) &writeReq, ATT_WRITE_REQ);
-                }
-                else
-                {
-                    ret_stat = SUCCESS;
-                }
-            }
-        }
+        status = NetReq_processIpcWritePeripheral(ipcMsg);
         break;
     }
 
@@ -1762,12 +1652,11 @@ static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
         break;
     }
 
-    if (ret_stat != SUCCESS)
+    if (status != SUCCESS)
     {
         // Respond to IPC with fail message ::TODO
         send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, ipcMsg->msg,
-                                ipcMsg->connHandle, (uint8_t *) &uuidRequest,
-                                0, NULL);
+                                ipcMsg->connHandle, ipcMsg->uuid, 0, NULL);
     }
 }
 
