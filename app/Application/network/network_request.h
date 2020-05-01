@@ -5,8 +5,8 @@
  *      Author: Oleh
  */
 
-#ifndef APPLICATION_BLE_NETWORK_REQUEST_H_
-#define APPLICATION_BLE_NETWORK_REQUEST_H_
+#ifndef APPLICATION_NETWORK_NETWORK_REQUEST_H_
+#define APPLICATION_NETWORK_NETWORK_REQUEST_H_
 
 
 #include "ipc/msg_handler.h"
@@ -19,4 +19,7 @@ bStatus_t NetReq_processIpcReadPeripheral(pkgDataPeriphery_t *ipcMsg);
 bStatus_t NetReq_processIpcWritePeripheral(pkgDataPeriphery_t *ipcMsg);
 
 
-#endif /* APPLICATION_BLE_NETWORK_REQUEST_H_ */
+extern uint16_t netMaxPduSize;
+
+
+#endif /* APPLICATION_NETWORK_NETWORK_REQUEST_H_ */

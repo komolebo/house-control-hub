@@ -9,14 +9,17 @@
 #include <icall.h>
 #include <uartlog/UartLog.h>
 #include <ble_user_config.h>
+#include <network/network_info.h>
+#include <network/network_request.h>
 #include <string.h>
 
 #include "util.h"
-#include "network_request.h"
-#include "network_info.h"
 #include "profiles_if.h"
 #include "ipc/uart_handler.h"
 #include "central.h"
+
+
+uint16_t netMaxPduSize; // TODO: move to needed module
 
 
 // Currently requested connection handle

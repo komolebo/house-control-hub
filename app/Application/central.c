@@ -25,6 +25,9 @@
 #include "board.h"
 
 #include <ble_user_config.h>
+#include <network/network_info.h>
+#include <network/network_request.h>
+#include <network/network_discovery.h>
 
 //#include "simple_gatt_profile.h"
 
@@ -38,9 +41,6 @@
 //#include "UartLog.h"
 #include <uartlog/UartLog.h>
 #include "ipc/msg_handler.h"
-#include "ble/network_info.h"
-#include "ble/network_request.h"
-
 /*********************************************************************
  * CONSTANTS
  */
@@ -118,14 +118,7 @@
 /*********************************************************************
  * TYPEDEFS
  */
-// Discovery states
-enum
-{
-  BLE_DISC_STATE_IDLE,                // Idle
-  BLE_DISC_STATE_MTU,                 // Exchange ATT MTU size
-  BLE_DISC_STATE_SVC,                 // Service discovery
-  BLE_DISC_STATE_UUID                 // UUIDs discovery
-};
+
 
 // Scanned device information record
 typedef struct
@@ -185,7 +178,6 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg);
 static void Central_processPairState(uint8_t state,
                                      scPairStateData_t* pPairData);
 static void Central_processPasscode(scPasscodeData_t *pData);
-static void Central_exchangeMtuSize();
 static bool SimpleCentral_findSvcUuid(uint16_t uuid, uint8_t *pData,
                                       uint16_t dataLen);
 static status_t Central_CancelRssi(uint16_t connHandle);
@@ -208,25 +200,8 @@ static uint8_t numScanRes = 0;
 static scanRec_t scanList[DEFAULT_MAX_SCAN_RES];
 #endif // DEFAULT_DEV_DISC_BY_SVC_UUID
 
-// Discovery state
-static uint8_t discState = BLE_DISC_STATE_IDLE;
-static uint8_t discConnHandle;
-
-// Entity ID globally used to check for source and/or destination of messages
-
-// Event globally used to post local events and pend on system and
-// local events.
-
-
-// Queue object used for app messages
-
-
-
 // Address mode
 static GAP_Addr_Modes_t addrMode = DEFAULT_ADDRESS_MODE;
-
-// Maximum PDU size (default = 27 octets)
-static uint16_t scMaxPduSize;
 
 // Current Random Private Address
 static uint8 rpa[B_ADDR_LEN] = {0};
@@ -241,9 +216,6 @@ static gapBondCBs_t bondMgrCBs =
     Central_passcodeCb, // Passcode callback
     Central_pairStateCb // Pairing/Bonding state Callback
 };
-
-
-
 
 // Accept or reject L2CAP connection parameter update request
 static bool acceptParamUpdateReq = true;
@@ -549,7 +521,7 @@ static void Central_processAppMsg(appEvt_t *pMsg)
 
     case EVT_SVC_DISC:
 //        Log_info0("Start service discovery");
-//        Central_exchangeMtuSize();
+//        NetDisc_exchangeMtuSize();
         break;
 
     case EVT_READ_RSSI:
@@ -800,109 +772,6 @@ static void Central_passcodeCb(uint8_t *deviceAddr, uint16_t connHandle,
     }
 }
 
-
-
-/*********************************************************************
- * @fn      Central_processGATTDiscEvent
- *
- * @brief   Process GATT discovery event
- *
- * @return  none
- */
-static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
-{
-    static uint8_t ipcRespBuff[CHARS_PER_DEVICE * ATT_BT_UUID_SIZE];
-
-    if (discState == BLE_DISC_STATE_MTU)
-    {
-        // MTU size response received, discover services
-        if (pMsg->method == ATT_EXCHANGE_MTU_RSP)
-        {
-            discState = BLE_DISC_STATE_SVC;
-
-            /* discover all device's services */
-            GATT_DiscAllPrimaryServices(discConnHandle, selfEntity);
-        }
-    }
-    else if (discState == BLE_DISC_STATE_SVC)
-    {
-        // Services found, store handles
-        uint8_t svcNum = ((attReadByGrpTypeRsp_t *)&pMsg->msg)->numGrps;
-
-        Log_info2("%s: services discovered: %u", (uintptr_t )__func__, svcNum);
-
-        // If procedure complete
-        if (((pMsg->method == ATT_READ_BY_GRP_TYPE_RSP)
-                && (pMsg->hdr.status == bleProcedureComplete))
-                || (pMsg->method == ATT_ERROR_RSP))
-        {
-            discState = BLE_DISC_STATE_UUID;
-
-            GATT_DiscAllCharDescs(discConnHandle, 0x001, 0xFFFF, selfEntity);
-        }
-    }
-    else if (discState == BLE_DISC_STATE_UUID)
-    {
-        if (pMsg->method == ATT_FIND_INFO_RSP)
-        {
-            // if 2 byte UUID format received
-            attFindInfoRsp_t* rsp = (attFindInfoRsp_t *)&pMsg->msg.findInfoRsp;
-
-            if (rsp->format == ATT_HANDLE_BT_UUID_TYPE)
-            {
-                for (uint8_t i = 0, *p = rsp->pInfo; i < rsp->numInfo;
-                        i++, p += sizeof(charInfo_t))
-                {
-                    uint16_t charHandle = BUILD_UINT16(p[0], p[1]);
-                    uint16_t charValue = BUILD_UINT16(p[2], p[3]);
-
-                    // Save only data UUIDs
-                    if (charValue != GATT_PRIMARY_SERVICE_UUID
-                            && charValue != GATT_SECONDARY_SERVICE_UUID
-                            && charValue != GATT_INCLUDE_UUID
-                            && charValue != GATT_CHARACTER_UUID
-                            && charValue != GATT_CHAR_USER_DESC_UUID
-                            && charValue != GATT_CLIENT_CHAR_CFG_UUID)
-                    {
-                        Log_info2("%s: discovered UUID: 0x%x",
-                                  (uintptr_t )__func__, charValue);
-
-                        uint8_t connIndex = NetInfo_addCharHandle(
-                                pMsg->connHandle, (uint8_t *) &charValue,
-                                charHandle);
-
-                        if (connIndex == CHARS_PER_DEVICE)
-                        {
-                            Log_error2("%s: Not enough memory for char handle 0x%x",
-                                    (uintptr_t )__func__, charValue);
-                        }
-                    }
-                }
-            }
-        }
-
-        // If procedure complete
-        if (((pMsg->method == ATT_FIND_INFO_RSP)
-                && (pMsg->hdr.status == bleProcedureComplete))
-                || (pMsg->method == ATT_ERROR_RSP))
-        {
-            Log_info1("%s: Discovery done", (uintptr_t )__func__);
-
-            // Send IPC report to the back
-            uint8_t bytes_populated = NetInfo_populateUuidIpcResp(
-                    pMsg->connHandle, &ipcRespBuff[0],
-                    CHARS_PER_DEVICE * ATT_BT_UUID_SIZE);
-
-            send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
-                                      bytes_populated,
-                                      (uint8_t *)&ipcRespBuff);
-
-            // Discovery done
-            discState = BLE_DISC_STATE_IDLE;
-        }
-    }
-}
-
 /*********************************************************************
  * @fn      Central_processGATTMsg
  *
@@ -966,7 +835,7 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
         }
         else if (discState != BLE_DISC_STATE_IDLE)
         {
-            Central_processGATTDiscEvent(pMsg);
+            NetDisc_processGATTEvent(pMsg);
         }
         else
         {
@@ -1237,7 +1106,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         temp16 = SCAN_FLT_PDU_CONNECTABLE_ONLY | SCAN_FLT_PDU_COMPLETE_ONLY;
         GapScan_setParam(SCAN_PARAM_FLT_PDU_TYPE, &temp16);
 
-        scMaxPduSize = pPkt->dataPktLen;
+        netMaxPduSize = pPkt->dataPktLen;
 
         Log_info0("Initialized");
         Log_info1("Num Conns: %d", numConn);
@@ -1294,8 +1163,7 @@ static void Central_processGapMsg(gapEventHdr_t *pMsg)
         Log_info1("Num Conns: %d", numConn);
 
         // Request MTU to be ready for next discovery request
-        discConnHandle = connHdlr;
-        Central_exchangeMtuSize(connHdlr);
+        NetDisc_exchangeMtuSize(connHdlr);
 
 #if 0
         send_central_ipc_msg_resp(CENTRAL_CONNECT_DEVICE,
@@ -1427,28 +1295,6 @@ static void Central_processCmdCompleteEvt(hciEvt_CmdComplete_t *pMsg)
   }
 }
 
-/*********************************************************************
- * @fn      Central_exchangeMtuSize
- *
- * @brief   Start service discovery.
- *
- * @return  none
- */
-static void Central_exchangeMtuSize()
-{
-    attExchangeMTUReq_t req;
-
-    discState = BLE_DISC_STATE_MTU;
-
-    // Discover GATT Server's Rx MTU size
-    req.clientRxMTU = scMaxPduSize - L2CAP_HDR_SIZE;
-
-    // ATT MTU size should be set to the minimum of the Client Rx MTU
-    // and Server Rx MTU values
-    VOID GATT_ExchangeMTU(discConnHandle, &req, selfEntity);
-
-    Log_info1("Exchanging MTU with 0x%x", discConnHandle);
-}
 
 /*********************************************************************
  * @fn      Central_processPairState

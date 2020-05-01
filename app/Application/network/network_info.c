@@ -5,9 +5,9 @@
  *      Author: Oleh
  */
 
+#include <network/network_info.h>
 #include "string.h"
 
-#include "network_info.h"
 #include "icall_ble_api.h"
 #include "icall.h"
 #include "util.h"
