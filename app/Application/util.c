@@ -529,5 +529,23 @@ uint8_t *Util_dequeueAppMsg()
     return Util_getQueueMsg(appMsgQueue);
 }
 
+
+/*********************************************************************
+ * @fn      Central_spin
+ *
+ * @brief   Spin forever
+ *
+ * @param   none
+ */
+void spinIndefinitely(void)
+{
+    volatile uint8_t x;
+
+    while (1)
+    {
+        x++;
+    }
+}
+
 /*********************************************************************
  *********************************************************************/

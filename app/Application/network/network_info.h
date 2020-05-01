@@ -47,8 +47,10 @@ uint8_t     NetInfo_getConnIndex(uint16_t connHandle);
 connRec_t * NetInfo_getConnInfo(uint16_t connHandle);
 connRec_t * NetInfo_getConnInfoByInd(uint8_t index);
 char *      NetInfo_getConnAddrStr(uint16_t connHandle);
-uint16_t    NetInfo_getCharHandle(uint16_t connHandle,
-                                  uint8_t charValue[UUID_DATA_LEN]);
+uint16_t    NetInfo_getCharHandleByVal(uint16_t connHandle,
+                                       uint8_t charValue[UUID_DATA_LEN]);
+uint8_t*    NetInfo_getCharValByHandle(uint16_t connHandle,
+                                       uint16_t charHandle);
 uint8_t     NetInfo_populateUuidIpcResp(uint16_t connHandle, uint8_t *buf,
                                         uint8_t len);
 

@@ -13,6 +13,7 @@
 #include <bcomdef.h>
 
 
+void NetReq_processGATTUpdatesEvent(gattMsgEvent_t *pMsg);
 void NetReq_processGATTExtEvent(gattMsgEvent_t *pMsg);
 
 bStatus_t NetReq_processIpcReadPeripheral(pkgDataPeriphery_t *ipcMsg);

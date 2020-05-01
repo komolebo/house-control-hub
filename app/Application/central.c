@@ -63,7 +63,7 @@
 #define SC_ADDR_STR_SIZE     15
 
 // Spin if the expression is not true
-#define CENTRAL_ASSERT(expr) if (!(expr)) Central_spin();
+#define CENTRAL_ASSERT(expr) if (!(expr)) spinIndefinitely();
 
 
 // Simple Central Task Events
@@ -224,24 +224,6 @@ static bool acceptParamUpdateReq = true;
 /*********************************************************************
  * PUBLIC FUNCTIONS
  */
-
-/*********************************************************************
- * @fn      Central_spin
- *
- * @brief   Spin forever
- *
- * @param   none
- */
-static void Central_spin(void)
-{
-    volatile uint8_t x;
-
-    while (1)
-    {
-        x++;
-    }
-}
-
 
 /*********************************************************************
  * @fn      Central_init
@@ -803,6 +785,12 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
                 // After a successful read, display the read value
                 Log_info1("Read rsp: 0x%02x", pMsg->msg.readRsp.pValue[0]);
             }
+        }
+        else if (pMsg->method == ATT_HANDLE_VALUE_NOTI
+                || pMsg->method == ATT_HANDLE_VALUE_IND)
+        {
+            NetReq_processGATTUpdatesEvent(pMsg);
+//            Log_error1("FC Violated: %d", pMsg->msg.flowCtrlEvt.opcode);
         }
         /*else if ((pMsg->method == ATT_WRITE_RSP)
                 || ((pMsg->method == ATT_ERROR_RSP)

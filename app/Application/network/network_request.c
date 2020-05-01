@@ -33,6 +33,37 @@ static uint16_t charValue = 0xFFFF;
 
 
 /*********************************************************************
+ * @fn      NetReq_processGATTUpdatesEvent
+ *
+ * @brief   Process GATT updates event, notification or indication
+ *
+ * @return  none
+ */
+void NetReq_processGATTUpdatesEvent(gattMsgEvent_t *pMsg)
+{
+    if (pMsg->method == ATT_HANDLE_VALUE_NOTI)
+    {
+        attHandleValueNoti_t *notifReq = (attHandleValueNoti_t *)pMsg;
+        uint8_t charValue[UUID_DATA_LEN];
+
+        memcpy(charValue,
+               NetInfo_getCharValByHandle(pMsg->connHandle, notifReq->handle),
+               sizeof(notifReq->handle));
+
+        send_peripheral_ipc_msg(PKG_PERIPHERY_UPDATES,
+                                PERIPHERY_MSG_NOTIFY,
+                                pMsg->connHandle,
+                                (uint8_t *) &charValue,
+                                notifReq->len, notifReq->pValue);
+    }
+    else if (pMsg->method == ATT_HANDLE_VALUE_IND)
+    {
+
+    }
+}
+
+
+/*********************************************************************
  * @fn      NetReq_processGATTExtEvent
  *
  * @brief   Process GATT discovery event
@@ -121,7 +152,7 @@ bStatus_t NetReq_processIpcWritePeripheral(pkgDataPeriphery_t *ipcMsg)
     // change globals
     connHandle = ipcMsg->connHandle;
     charValue = *(uint16_t *)ipcMsg->uuid;
-    charHandle = NetInfo_getCharHandle(connHandle, ipcMsg->uuid);
+    charHandle = NetInfo_getCharHandleByVal(connHandle, ipcMsg->uuid);
 
     if (charHandle == CONNHANDLE_INVALID)
     {

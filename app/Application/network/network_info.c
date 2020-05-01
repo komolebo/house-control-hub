@@ -14,7 +14,7 @@
 
 
 // Spin if the expression is not true
-#define NETINFO_ASSERT(expr) if (!(expr)) Central_spin();
+#define NETINFO_ASSERT(expr) if (!(expr)) spinIndefinitely();
 
 
 
@@ -220,7 +220,7 @@ uint8_t NetInfo_addCharHandle(uint16_t connHandle,
     return CHARS_PER_DEVICE;
 }
 
-uint16_t NetInfo_getCharHandle(uint16_t connHandle,
+uint16_t NetInfo_getCharHandleByVal(uint16_t connHandle,
                                uint8_t charValue[UUID_DATA_LEN])
 {
     connRec_t* conn = NetInfo_getConnInfo(connHandle);
@@ -237,6 +237,25 @@ uint16_t NetInfo_getCharHandle(uint16_t connHandle,
     }
 
     return CONNHANDLE_INVALID;
+}
+
+uint8_t* NetInfo_getCharValByHandle(uint16_t connHandle,
+                                    uint16_t charHandle)
+{
+    connRec_t* conn = NetInfo_getConnInfo(connHandle);
+
+    if (conn)
+    {
+        for (uint8_t i = 0; i < CHARS_PER_DEVICE; i++)
+        {
+            if (conn->charData[i].charHandle == charHandle)
+            {
+                return (uint8_t *) &conn->charData[i].charValue;
+            }
+        }
+    }
+
+    return NULL;
 }
 
 uint8_t NetInfo_populateUuidIpcResp(uint16_t connHandle, uint8_t *buf,

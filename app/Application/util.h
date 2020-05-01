@@ -229,6 +229,7 @@ extern uint8_t *Util_dequeueAppMsg();
 bool Util_convertHex2Str(const uint8_t *hex_arr, uint8_t *str_arr, uint16_t hex_len,
                          uint16_t str_len);
 
+void spinIndefinitely(void);
 /*********************************************************************
 *********************************************************************/
 
