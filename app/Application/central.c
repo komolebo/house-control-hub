@@ -503,8 +503,12 @@ static void Central_processAppMsg(appEvt_t *pMsg)
     {
         GapScan_Evt_AdvRpt_t* pAdvRpt = (GapScan_Evt_AdvRpt_t*) (pMsg->pData);
 
-        if (SimpleCentral_findSvcUuid(0xFFF0 /*CONFIG_SERVICE_SERV_UUID*/, // TODO: replace with actual UUID
-                        pAdvRpt->pData, pAdvRpt->dataLen))
+        if ( SimpleCentral_findSvcUuid(DATA_SERVICE_SERV_UUID, pAdvRpt->pData,
+                                      pAdvRpt->dataLen)
+          && SimpleCentral_findSvcUuid(CONFIG_SERVICE_SERV_UUID,
+                                      pAdvRpt->pData, pAdvRpt->dataLen)/*
+          && SimpleCentral_findSvcUuid(DATA_SERVICE_SERV_UUID,
+                                       pAdvRpt->pData, pAdvRpt->dataLen)*/)
         {
             Central_addScanInfo(pAdvRpt->addr, pAdvRpt->addrType);
             send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICES,
