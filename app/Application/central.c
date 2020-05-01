@@ -126,7 +126,6 @@ enum
   BLE_DISC_STATE_UUID                 // UUIDs discovery
 };
 
-
 // Scanned device information record
 typedef struct
 {
@@ -191,7 +190,6 @@ static bool SimpleCentral_findSvcUuid(uint16_t uuid, uint8_t *pData,
 static status_t Central_CancelRssi(uint16_t connHandle);
 static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg);
 static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg);
-static bool connectScannedDevice(uint8_t index);
 static bool connectDevice(uint8_t *pAddr);
 /*********************************************************************
  * LOCAL VARIABLES
@@ -238,10 +236,6 @@ static uint8 rpa[B_ADDR_LEN] = {0};
 // Clock instance for RPA read events.
 static Clock_Struct clkRpaRead;
 static Clock_Struct clkScanDevices;
-
-
-// Value to write
-static uint8_t charVal = 0;
 
 // Bond Manager Callbacks
 static gapBondCBs_t bondMgrCBs =
@@ -514,14 +508,12 @@ static void Central_processAppMsg(appEvt_t *pMsg)
         {
             Central_addScanInfo(pAdvRpt->addr, pAdvRpt->addrType);
             send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICES,
-                                      B_ADDR_LEN,
-                                      pAdvRpt->addr);
+                                      B_ADDR_LEN, pAdvRpt->addr);
 
             Log_info1("Discovered: %s",
-                      (uintptr_t)Util_convertBdAddr2Str(pAdvRpt->addr));
+                      (uintptr_t )Util_convertBdAddr2Str(pAdvRpt->addr));
 
             connectDevice(pAdvRpt->addr);
-//            connectScannedDevice(0);
         }
 
         // Free report payload data
@@ -906,53 +898,6 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
             // Discovery done
             discState = BLE_DISC_STATE_IDLE;
         }
-
-
-#if 0
-        uint16_t uuidFound = pMsg->msg.readByTypeRsp.numPairs;
-        // Characteristic descriptors found
-        if (pMsg->method == ATT_READ_BY_TYPE_RSP && uuidFound > 0)
-        {
-            uint8_t len = pMsg->msg.readByTypeRsp.len;
-
-            Log_info2("%s: UuidDiscovery - found: %d",
-                      (uintptr_t )__func__, uuidFound);
-
-            // For each characteristic declaration
-            for (uint8_t i = 0, *p = pMsg->msg.readByTypeRsp.pDataList; i < uuidFound;
-                    i++, p += len)
-            {
-                // Parse characteristic declaration, UUID is last 2 bytes of an element
-                uint16_t uuid_val = BUILD_UINT16(p[len - 2], p[len - 1]);
-                uint16_t uuid_hdl = BUILD_UINT16(p[len - 4], p[len - 3]);
-
-                // If UUID is of interest, store handle
-                NetInfo_addCharHandle(discConnHandle, (uint8_t *) &uuid_val,
-                                      uuid_hdl);
-
-                Log_info2("%s: UuidDiscovery - retain characteristic: 0x%x",
-                          (uintptr_t )__func__, uuid_val);
-
-                ipcRespBuff[i + discUuid] = uuid_val;
-            }
-
-            discUuid += uuidFound;
-        }
-
-        // If procedure complete
-        if (((pMsg->method == ATT_READ_BY_TYPE_RSP)
-                && (pMsg->hdr.status == bleProcedureComplete))
-                || (pMsg->method == ATT_ERROR_RSP))
-        {
-            // Send IPC report to the back
-            send_central_ipc_msg_resp(CENTRAL_MSG_DISCOVER_DEVICE_UUIDS,
-                                      discUuid * ATT_BT_UUID_SIZE,
-                                      (uint8_t *)&ipcRespBuff);
-
-            // Discovery done
-            discState = BLE_DISC_STATE_IDLE;
-        }
-#endif
     }
 }
 
@@ -965,7 +910,6 @@ static void Central_processGATTDiscEvent(gattMsgEvent_t *pMsg)
  */
 static void Central_processGATTPeripheralEvent(gattMsgEvent_t *pMsg)
 {
-    static uint8_t buff_str[50];
     if (pMsg->method == ATT_READ_BY_TYPE_RSP)
     {
         if (!uuidRequest)
@@ -974,42 +918,35 @@ static void Central_processGATTPeripheralEvent(gattMsgEvent_t *pMsg)
                        (uintptr_t)__func__, pMsg->method);
         }
 
-        uint16_t attr_len = pMsg->msg.readByTypeRsp.len;
-        uint8_t pairs = pMsg->msg.readByTypeRsp.numPairs;
-        uint16_t dataLen = pMsg->msg.readByTypeRsp.dataLen;
-        uint8_t *pData = pMsg->msg.readByTypeRsp.pDataList + sizeof(dataLen);
+        attReadByTypeRsp_t* resp = &pMsg->msg.readByTypeRsp;
+//        uint16_t attr_len = pMsg->msg.readByTypeRsp.len;
+        static uint16_t data = 0;
+        uint16_t len = resp->len;
 
-        Log_info2("%s: GattRead response - pairs found: %d",
-                  (uintptr_t )__func__, pairs);
-
-        for (uint8_t i = 0; i < pairs; i++, pData += attr_len)
+        if (len)
         {
-            // attribute data list contains useful data size & payload
-            if (dataLen > sizeof(dataLen))
-            {
-                if (Util_convertHex2Str(pData, &buff_str[0], attr_len,
-                                        50) == TRUE)
-                {
-                    // UUID response received, store its value
-                    Log_info3("%s: UUID Read result[%d]: %s",
-                              (uintptr_t )__func__, dataLen,
-                              (uintptr_t )(pData));
-                }
-            }
+            memcpy((uint8_t *)&data, resp->pDataList + 2, len - 2);
         }
 
-        send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, PERIPHERY_MSG_READ,
-                                pMsg->connHandle, (uint8_t *) uuidRequest,
-                                dataLen, pData);
-        uuidRequest = 0;
+        Log_info4("%s: GattRead response - dataLen: %d, len: %d, data: 0x%x",
+                  (uintptr_t )__func__, len, len, data);
+
+        // If procedure complete
+        if (((pMsg->method == ATT_READ_BY_TYPE_RSP)
+                && (pMsg->hdr.status == bleProcedureComplete))/*
+                || (pMsg->method == ATT_ERROR_RSP)*/)
+        {
+            send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, PERIPHERY_MSG_READ,
+                                    pMsg->connHandle, (uint8_t *) &uuidRequest,
+                                    sizeof(data), (uint8_t *)&data);
+            uuidRequest = 0;
+        }
     }
     else if (pMsg->method == ATT_WRITE_RSP)
     {
-        Log_warning0("ACK write received, GOOD!!");
-
         send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, PERIPHERY_MSG_WRITE,
-                                pMsg->connHandle, (uint8_t*) &uuidRequest, 0,
-                                NULL);
+                                pMsg->connHandle, (uint8_t*) &uuidRequest,
+                                0, NULL);
         uuidRequest = 0;
     }
 }
@@ -1024,7 +961,6 @@ static void Central_processGATTPeripheralEvent(gattMsgEvent_t *pMsg)
  */
 static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
 {
-//    Log_error1("DEBUG: RECEIVED GATT MSG: 0x%x", pMsg->method);
     if (linkDB_Up(pMsg->connHandle))
     {
         // See if GATT server was unable to transmit an ATT response
@@ -1048,7 +984,7 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
                 Log_info1("Read rsp: 0x%02x", pMsg->msg.readRsp.pValue[0]);
             }
         }
-        else if ((pMsg->method == ATT_WRITE_RSP)
+        /*else if ((pMsg->method == ATT_WRITE_RSP)
                 || ((pMsg->method == ATT_ERROR_RSP)
                         && (pMsg->msg.errorRsp.reqOpcode == ATT_WRITE_REQ)))
         {
@@ -1062,7 +998,7 @@ static void Central_processGATTMsg(gattMsgEvent_t *pMsg)
                 // increment value
                 Log_info1("Write sent: 0x%02x", charVal);
             }
-        }
+        }*/
         else if (pMsg->method == ATT_FLOW_CTRL_VIOLATED_EVENT)
         {
             // ATT request-response or indication-confirmation flow control is
@@ -1745,7 +1681,9 @@ static void Central_processIpcHubReq(pkgDataCentral_t *ipcMsg)
 
 static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
 {
+    bStatus_t ret_stat = FAILURE;
     uint16_t connHandle = ipcMsg->connHandle;
+
     uuidRequest = *(uint16_t *)&ipcMsg->uuid; // TODO: endians
 
     switch (ipcMsg->msg)
@@ -1753,42 +1691,79 @@ static void Central_processIpcPeripheryReq(pkgDataPeriphery_t *ipcMsg)
     case PERIPHERY_MSG_READ:
     {
         attAttrType_t attr_type = {.len = UUID_DATA_LEN };
-        memcpy(attr_type.uuid, (uint8_t *) uuidRequest, sizeof(uuidRequest));
-        attReadByTypeReq_t characteristic = {1,65535, attr_type}; // TODO: handles
+        memcpy(attr_type.uuid, (uint8_t *) &uuidRequest, sizeof(uuidRequest));
 
-        if (GATT_ReadUsingCharUUID(connHandle,
-                                   (attReadByTypeReq_t* )&characteristic,
+        attReadByTypeReq_t readReq = { 0x001, 0xFFFF, attr_type };
+
+        if (GATT_ReadUsingCharUUID(connHandle, (attReadByTypeReq_t* )&readReq,
                                    selfEntity) != SUCCESS)
         {
             Log_error2("%s: peripheral read request for [0x%x] failed to perform",
                        (uintptr_t )__func__, uuidRequest);
-            // TODO: IPC resp
+        }
+        else
+        {
+            ret_stat = SUCCESS;
         }
         break;
     }
-
 
     case PERIPHERY_MSG_WRITE:
     {
-        attWriteReq_t req;
-        req.handle = NetInfo_getCharHandle(connHandle,
-                                           (uint8_t *) &uuidRequest);
-        req.len = ipcMsg->len;
-        req.sig = req.cmd = 0;
-        memcpy(req.pValue, ipcMsg->data, req.len);
-        if ( GATT_WriteCharValue(connHandle, &req, selfEntity) != SUCCESS)
+        attWriteReq_t writeReq;
+
+        if ((writeReq.handle = NetInfo_getCharHandle(connHandle,
+                                                (uint8_t *) &uuidRequest))
+                == CONNHANDLE_INVALID)
         {
-            Log_error2(
-                    "%s: peripheral write request for [0x%x] failed to perform",
-                    (uintptr_t )__func__, uuidRequest);
-            // TODO: IPC resp
+            Log_error2("%s: handle doesn't exist for 0x%x",
+                                   (uintptr_t )__func__, uuidRequest);
+        }
+        else
+        {
+            writeReq.len = ipcMsg->len;
+            writeReq.pValue = GATT_bm_alloc(connHandle, ATT_WRITE_REQ,
+                                            writeReq.len, NULL);
+            if (writeReq.pValue == NULL)
+            {
+                Log_error1("%s: not enough memory in GATT platform",
+                           (uintptr_t )__func__);
+            }
+            else
+            {
+                writeReq.sig = writeReq.cmd = 0;
+                memcpy(writeReq.pValue, ipcMsg->data, writeReq.len);
+
+                Log_info4("%s: writing UUID: 0x%x, len: %d, value: 0x%x",
+                          (uintptr_t)__func__, uuidRequest, writeReq.len,
+                          *writeReq.pValue);
+
+                if (GATT_WriteCharValue(connHandle, &writeReq,
+                        selfEntity) != SUCCESS)
+                {
+                    Log_error2("%s: failed write request for [0x%x]",
+                               (uintptr_t )__func__, uuidRequest);
+                    GATT_bm_free((gattMsg_t *) &writeReq, ATT_WRITE_REQ);
+                }
+                else
+                {
+                    ret_stat = SUCCESS;
+                }
+            }
         }
         break;
     }
 
-
     default:
         break;
+    }
+
+    if (ret_stat != SUCCESS)
+    {
+        // Respond to IPC with fail message ::TODO
+        send_peripheral_ipc_msg(PKG_PERIPHERY_RESP, ipcMsg->msg,
+                                ipcMsg->connHandle, (uint8_t *) &uuidRequest,
+                                0, NULL);
     }
 }
 
