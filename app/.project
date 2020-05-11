@@ -4,6 +4,7 @@
 	<comment></comment>
 	<projects>
 		<project>ble5_host_test_cc2640r2lp_stack_library</project>
+		<project>sdk</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

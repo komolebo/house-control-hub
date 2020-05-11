@@ -158,7 +158,7 @@
 				</configuration>
 			</storageModule>
 			<storageModule moduleId="org.eclipse.cdt.core.externalSettings">
-				<externalSettings containerId="ble5_host_test_cc2640r2lp_stack_library;" factoryId="org.eclipse.cdt.core.cfg.export.settings.sipplier"/>
+				<externalSettings containerId="sdk;" factoryId="org.eclipse.cdt.core.cfg.export.settings.sipplier"/>
 			</storageModule>
 		</cconfiguration>
 		<cconfiguration id="com.ti.ccstudio.buildDefinitions.TMS470.Default.229575260">

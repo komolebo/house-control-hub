@@ -78,10 +78,6 @@
 
     HCI_TL_FULL             - All supported HCI commands are available via the Tranport Layer's NPI.
                             - Intended for NP solution.
-    HCI_TL_PTM              - Only those HCI commands needed for Production Test Mode are available
-                            via the Transport Layer's NPI
-                            - Intended for SOC solutions where, during production, accesss is temporarily
-                              needed (e.g. for PHY testing using Direct Test Mode, etc.).
     HCI_TL_NONE             - No supported HCI commands are available via the Transport Layer's NPI.
                             - Intended for SOC solutions.
 
@@ -126,7 +122,7 @@
 /* -DGATT_DB_OFF_CHIP */
 
 /* Include GAP Bond Manager */
--DGAP_BOND_MGR
+/* -DGAP_BOND_MGR */
 
 /* BLE v4.1 Features */
 /* -DV41_FEATURES=L2CAP_COC_CFG */
@@ -148,6 +144,5 @@
  */
 
 /* Include Transport Layer (Full or PTM) */
--DHCI_TL_NONE
-/* -DHCI_TL_PTM */
-/* -DHCI_TL_FULL */
+/* -DHCI_TL_NONE */
+-DHCI_TL_FULL
