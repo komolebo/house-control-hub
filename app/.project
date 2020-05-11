@@ -3,7 +3,7 @@
 	<name>app</name>
 	<comment></comment>
 	<projects>
-		<project>sdk</project>
+		<project>ble5_host_test_cc2640r2lp_stack_library</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>
@@ -39,6 +39,11 @@
 		</link>
 		<link>
 			<name>ICallBLE</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>NPI</name>
 			<type>2</type>
 			<locationURI>virtual:/virtual</locationURI>
 		</link>
@@ -83,6 +88,11 @@
 			<locationURI>SRC_COMMON_DIR1/icall/src/icall_user_config.c</locationURI>
 		</link>
 		<link>
+			<name>ICall/icall_user_config.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/icall/src/inc/icall_user_config.h</locationURI>
+		</link>
+		<link>
 			<name>ICallBLE/ble_user_config.c</name>
 			<type>1</type>
 			<locationURI>SRC_BLE_DIR/icall/app/ble_user_config.c</locationURI>
@@ -101,6 +111,11 @@
 			<name>ICallBLE/icall_ble_apimsg.h</name>
 			<type>1</type>
 			<locationURI>SRC_BLE_DIR/icall/inc/icall_ble_apimsg.h</locationURI>
+		</link>
+		<link>
+			<name>ICallBLE/icall_hci_tl.c</name>
+			<type>1</type>
+			<locationURI>SRC_BLE_DIR/icall/app/icall_hci_tl.c</locationURI>
 		</link>
 		<link>
 			<name>Include/gap.h</name>
@@ -128,9 +143,54 @@
 			<locationURI>SRC_COMMON_DIR1/osal/src/inc/osal_snv.h</locationURI>
 		</link>
 		<link>
+			<name>NPI/Transport</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>NPI/npi_ble.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_ble.h</locationURI>
+		</link>
+		<link>
+			<name>NPI/npi_frame.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_frame.h</locationURI>
+		</link>
+		<link>
+			<name>NPI/npi_frame_hci.c</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/npi_frame_hci.c</locationURI>
+		</link>
+		<link>
+			<name>NPI/npi_rxbuf.c</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/npi_rxbuf.c</locationURI>
+		</link>
+		<link>
+			<name>NPI/npi_rxbuf.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_rxbuf.h</locationURI>
+		</link>
+		<link>
+			<name>NPI/npi_task.c</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/npi_task.c</locationURI>
+		</link>
+		<link>
+			<name>NPI/npi_task.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_task.h</locationURI>
+		</link>
+		<link>
 			<name>Startup/board.c</name>
 			<type>1</type>
 			<locationURI>SRC_BLE_DIR/target/board.c</locationURI>
+		</link>
+		<link>
+			<name>Startup/ccfg_app_ble.c</name>
+			<type>1</type>
+			<locationURI>EXAMPLE_BLE_ROOT/src/ccfg_app_ble.c</locationURI>
 		</link>
 		<link>
 			<name>TOOLS/cc26xx_app.cmd</name>
@@ -157,11 +217,56 @@
 			<type>1</type>
 			<locationURI>SRC_COMMON_DIR1/hal/src/target/_common/TRNGCC26XX.h</locationURI>
 		</link>
+		<link>
+			<name>NPI/Transport/SPI</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/UART</name>
+			<type>2</type>
+			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/npi_config.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_config.h</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/npi_tl.c</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/npi_tl.c</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/npi_tl.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_tl.h</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/SPI/npi_tl_spi.c</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/npi_tl_spi.c</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/SPI/npi_tl_spi.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_tl_spi.h</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/UART/npi_tl_uart.c</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/npi_tl_uart.c</locationURI>
+		</link>
+		<link>
+			<name>NPI/Transport/UART/npi_tl_uart.h</name>
+			<type>1</type>
+			<locationURI>SRC_COMMON_DIR1/npi/src/inc/npi_tl_uart.h</locationURI>
+		</link>
 	</linkedResources>
 	<variableList>
 		<variable>
 			<name>EXAMPLE_BLE_ROOT</name>
-			<value>$%7BCOM_TI_SIMPLELINK_CC2640R2_SDK_INSTALL_DIR%7D/examples/rtos/CC2640R2_LAUNCHXL/ble5stack/simple_central</value>
+			<value>$%7BCOM_TI_SIMPLELINK_CC2640R2_SDK_INSTALL_DIR%7D/examples/rtos/CC2640R2_LAUNCHXL/ble5stack/host_test</value>
 		</variable>
 		<variable>
 			<name>SRC_BLE_DIR</name>

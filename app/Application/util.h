@@ -67,14 +67,10 @@ extern "C" {
 #include <ti/sysbios/knl/Clock.h>
 #include <ti/sysbios/knl/Queue.h>
 #include <ti/sysbios/knl/Event.h>
-#include <ti/sysbios/knl/Task.h>
-#include <icall.h>
-#include <bcomdef.h>
-#include "icall_ble_api.h"
+
 /*********************************************************************
 *  EXTERNAL VARIABLES
 */
-extern ICall_SyncHandle eventSyncHandle;
 
 /*********************************************************************
  * CONSTANTS
@@ -98,14 +94,6 @@ typedef struct
   uint16_t event; // Event type.
   uint8_t state; // Event state;
 }appEvtHdr_t;
-
-// App event passed from profiles.
-typedef struct
-{
-  appEvtHdr_t hdr; // event header
-  uint8_t *pData;  // event data
-} appEvt_t;
-
 
 /*********************************************************************
  * MACROS
@@ -189,14 +177,32 @@ extern void Util_rescheduleClock(Clock_Struct *pClock, uint32_t clockPeriod);
  *
  * @return  A queue handle.
  */
-extern void Util_constructQueue();
+extern Queue_Handle Util_constructQueue(Queue_Struct *pQueue);
+
+/**
+ * @brief   Creates a queue node and puts the node in RTOS queue.
+ *
+ * @param   msgQueue - queue handle.
+ *
+ * @param   event - the thread's event processing event that this queue is
+ *                  associated with.
+ *
+ * @param   pMsg - pointer to message to be queued
+ *
+ * @return  TRUE if message was queued, FALSE otherwise.
+ */
+extern uint8_t Util_enqueueMsg(Queue_Handle msgQueue,
+                               Event_Handle event,
+                               uint8_t *pMsg);
 
 /**
  * @brief   Dequeues the message from the RTOS queue.
  *
+ * @param   msgQueue - queue handle.
+ *
  * @return  pointer to dequeued message, NULL otherwise.
  */
-extern uint8_t *Util_dequeueAppMsg();
+extern uint8_t *Util_dequeueMsg(Queue_Handle msgQueue);
 
 /**
  * @brief   Convert Bluetooth address to string. Only needed when
@@ -219,17 +225,7 @@ extern char *Util_convertBdAddr2Str(uint8_t *pAddr);
  */
 extern uint8_t Util_isBufSet(uint8_t *pBuf, uint8_t pattern, uint16_t len);
 
-extern uint32_t Util_listenEventMsg(uint32_t event_mask);
 
-extern status_t Util_enqueueAppMsg(uint8_t event, uint8_t state,
-                                   uint8_t *pData);
-
-extern uint8_t *Util_dequeueAppMsg();
-
-bool Util_convertHex2Str(const uint8_t *hex_arr, uint8_t *str_arr, uint16_t hex_len,
-                         uint16_t str_len);
-
-void spinIndefinitely(void);
 /*********************************************************************
 *********************************************************************/
 

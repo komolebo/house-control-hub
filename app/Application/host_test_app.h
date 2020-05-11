@@ -1,15 +1,16 @@
 /******************************************************************************
 
- @file  ccfg_app_ble.c
+ @file  host_test_app.h
 
- @brief Customer Configuration CC26xx PG2 device family.
+ @brief This file contains the HostTestApp sample application definitions and
+        prototypes.
 
  Group: WCS, BTS
  Target Device: cc2640r2
 
  ******************************************************************************
  
- Copyright (c) 2014-2020, Texas Instruments Incorporated
+ Copyright (c) 2013-2020, Texas Instruments Incorporated
  All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
@@ -44,27 +45,41 @@
  
  *****************************************************************************/
 
-//
-//       ===> READ THIS BEFORE MODIFYING THIS FILE
-//
-//
-//       ===> READ THIS BEFORE MODIFYING THIS FILE
-//
-//
-//       ===> READ THIS BEFORE MODIFYING THIS FILE
-//
+#ifndef HOSTESTAPP_H
+#define HOSTESTAPP_H
 
-// The customer configuration area (ccfg section) is located at the end of the
-// flash and reflect the hw configuration of the device. it is very important
-// that it remains align with the version of driverlib you are using.
-// all BLE project except sensor tag use the same configuration.
-// Keeping the "#include <startup_files/ccfg.c>" guarantee that your project using
-// driverlib and the ccfg area will be align.
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
-// you can modify it if you want, the recommend way will be to remove the
-// bellow include, copy the content of the <startup_files/ccfg.c> file in this
-// file and rebuild.
+/*********************************************************************
+ * INCLUDES
+ */
 
-// ==> KEEP IN MIND that if you do so, be sure that any further update of the
-// driverlib must be align with your modified version of ccfg area.
-#include <startup_files/ccfg.c>
+/*********************************************************************
+ * CONSTANTS
+ */
+
+/*********************************************************************
+ * MACROS
+ */
+
+/*********************************************************************
+ * FUNCTIONS
+ */
+
+/*
+ * Task creation function for the Host Test App.
+ */
+extern void HostTestApp_createTask(void);
+
+
+/*********************************************************************
+*********************************************************************/
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* HOSTESTAPP_H */
